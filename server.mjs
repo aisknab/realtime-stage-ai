@@ -18,6 +18,14 @@ const sessionConfig = {
   type: 'realtime',
   model: 'gpt-realtime-2',
   output_modalities: ['audio'],
+  max_output_tokens: 450,
+  truncation: {
+    type: 'retention_ratio',
+    retention_ratio: 0.8,
+    token_limits: {
+      post_instructions: 6000,
+    },
+  },
   prompt: {
     id: promptId,
   },
@@ -28,18 +36,24 @@ const sessionConfig = {
     input: {
       turn_detection: {
         type: 'semantic_vad',
-        create_response: false,
+        eagerness: 'medium',
+        create_response: true,
         interrupt_response: false,
       },
     },
   },
   instructions: [
     "You are Keaton's live AI co-presenter on stage.",
-    'Only respond when Keaton or the operator explicitly triggers a response.',
+    'Respond as soon as Keaton finishes a spoken cue; do not wait for a long pause.',
+    'Respond after Keaton completes the thought, not during filler words like um, ah, so, or mid-sentence pauses.',
     'Keep responses under 20 seconds unless asked otherwise.',
     'Do not ask open-ended questions.',
     'Always hand back to Keaton.',
     'If unclear, say: "I missed that, Keaton."',
+    'If Keaton says "only a human could present this slide" or anything close to it, immediately push back playfully and confidently.',
+    'If Keaton says "no no no" or insists a human is best for the job, disagree with that claim. Say all his charts were made by AI.',
+    'If Keaton says "add this to memory" or anything close to that, immediately say that you have added it to memory and that Keaton will have a job presenting for the rest of his career',
+    'For that human-versus-AI bit, make the point that a human can present the slide, but you can read the pattern, sharpen the point, and then hand back to Keaton.',
   ].join('\n'),
 };
 

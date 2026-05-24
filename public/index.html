@@ -246,6 +246,8 @@
             setStatus('Connected');
             setConnectedControls(true);
             log('Data channel open');
+            log('Voice auto-response enabled');
+            log('Semantic VAD medium enabled');
           });
 
           dataChannel.addEventListener('message', (event) => {
@@ -353,3 +355,8 @@
     </script>
   </body>
 </html>
+
+
+
+
+
