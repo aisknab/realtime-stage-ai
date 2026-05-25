@@ -156,7 +156,7 @@
 
       <section class="controls" aria-label="Stage AI controls">
         <button id="connectBtn" type="button">CONNECT AI</button>
-        <button id="askBtn" type="button" disabled>ASK AI</button>
+        <button id="askBtn" type="button" disabled>ASK CRITAI</button>
         <button id="muteBtn" type="button" disabled>MUTE MIC TO AI</button>
         <button id="killBtn" type="button" disabled>KILL AI</button>
       </section>
@@ -246,8 +246,8 @@
             setStatus('Connected');
             setConnectedControls(true);
             log('Data channel open');
-            log('Assistant wake-cue auto-response enabled');
-            log('Semantic VAD low + far-field noise reduction enabled');
+            log('Critai wake-cue auto-response enabled');
+            log('Semantic VAD high + far-field noise reduction enabled');
           });
 
           dataChannel.addEventListener('message', (event) => {
@@ -318,7 +318,7 @@
 
       function askAi() {
         if (!dataChannel || dataChannel.readyState !== 'open') {
-          log('ASK AI ignored: data channel is not open');
+          log('ASK CRITAI ignored: data channel is not open');
           return;
         }
 
@@ -327,12 +327,12 @@
           response: {
             output_modalities: ['audio'],
             instructions:
-              "Respond now to Keaton's latest cue. Be concise, stage-ready, and hand back to Keaton.",
+              "Respond now to Keaton's latest cue as Critai. Be concise, stage-ready, and hand back to Keaton.",
           },
         };
 
         dataChannel.send(JSON.stringify(event));
-        log('ASK AI sent', event);
+        log('ASK CRITAI sent', event);
       }
 
       function toggleMute() {
