@@ -233,6 +233,14 @@
       const TOKEN_PRUNE_THRESHOLD = 18000;
       const ROLLING_MEMORY_KEEP_ITEMS = 4;
       const ROLLING_MEMORY_MIN_ITEMS = 5;
+      const FAST_FINALE_TURN_DETECTION = {
+        type: 'server_vad',
+        threshold: 0.5,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 250,
+        create_response: true,
+        interrupt_response: false,
+      };
 
       let peerConnection;
       let dataChannel;
@@ -545,6 +553,20 @@
           `Finale mode enabled by ${reason}`
         );
 
+        sendRealtimeEvent(
+          {
+            type: 'session.update',
+            session: {
+              audio: {
+                input: {
+                  turn_detection: FAST_FINALE_TURN_DETECTION,
+                },
+              },
+            },
+          },
+          'Finale fast turn detection enabled'
+        );
+
         pruneConversation(reason, FINALE_KEEP_ITEMS);
       }
 
@@ -625,7 +647,7 @@
             log('Critai wake-cue auto-response enabled');
             log('Semantic VAD high + far-field noise reduction enabled');
             log('Rolling memory enabled after each completed response');
-            log('Finale mode will trim old context after 24 minutes');
+            log('Finale mode will trim old context and use faster turn detection after 24 minutes');
           });
 
           dataChannel.addEventListener('message', (event) => {
