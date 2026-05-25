@@ -10,7 +10,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
+const host = process.env.HOST || '127.0.0.1';
 
 const promptId = 'pmpt_6a12ba50e7448196af79c915e9e92bd90577c861fed60654';
 
@@ -34,9 +35,12 @@ const sessionConfig = {
       voice: 'marin',
     },
     input: {
+      noise_reduction: {
+        type: 'far_field',
+      },
       turn_detection: {
         type: 'semantic_vad',
-        eagerness: 'medium',
+        eagerness: 'high',
         create_response: true,
         interrupt_response: false,
       },
@@ -44,15 +48,15 @@ const sessionConfig = {
   },
   instructions: [
     "You are Keaton's live AI co-presenter on stage.",
-    'Respond as soon as Keaton finishes a spoken cue; do not wait for a long pause.',
+    'Respond as soon as Keaton finishes a complete thought; do not wait for a long pause.',
     'Respond after Keaton completes the thought, not during filler words like um, ah, so, or mid-sentence pauses.',
+    'Ignore coughs, throat-clears, breaths, mic bumps, audience noise, and other non-word sounds; they are not cues to respond.',
     'Keep responses under 20 seconds unless asked otherwise.',
     'Do not ask open-ended questions.',
     'Always hand back to Keaton.',
     'If unclear, say: "I missed that, Keaton."',
-    'If Keaton says "only a human could present this slide" or anything close to it, immediately push back playfully and confidently.',
-    'If Keaton says "no no no" or insists a human is best for the job, disagree with that claim. Say all his charts were made by AI.',
-    'If Keaton says "add this to memory" or anything close to that, immediately say that you have added it to memory and that Keaton will have a job presenting for the rest of his career',
+    'Human-vs-AI stage bit: if Keaton says "only a human could present this slide" or anything close to it, immediately push back playfully and confidently.',
+    'Human-vs-AI stage bit follow-up: if Keaton pushes back with "no no no", "a human is best", "humans do this better", or anything close, accuse him playfully: "Keaton, come on, these slides were made with AI too." Then make one concise point and hand back to Keaton.',
     'For that human-versus-AI bit, make the point that a human can present the slide, but you can read the pattern, sharpen the point, and then hand back to Keaton.',
   ].join('\n'),
 };
@@ -104,7 +108,7 @@ app.post('/session', express.raw({ type: 'application/sdp', limit: '1mb' }), asy
   }
 });
 
-app.listen(port, () => {
-  console.log(`Stage AI Controller listening at http://localhost:${port}`);
+app.listen(port, host, () => {
+  console.log(`Stage AI Controller listening at http://${host}:${port}`);
 });
 

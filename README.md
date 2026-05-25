@@ -39,8 +39,15 @@ http://localhost:3000
 
 Click `CONNECT AI`, allow microphone access, and speak to the AI. The `ASK AI` button is still available as a manual cue, but normal spoken turns will trigger responses automatically.
 
-The session uses `semantic_vad` with `eagerness: medium` so filler words and mid-sentence pauses are less likely to trigger an early response, while still responding automatically. Response interruption stays disabled, and rolling conversation context is limited with retention-ratio truncation to reduce long-session slowdown.
+The session uses `semantic_vad` with `eagerness: high` for faster responses, plus `audio.input.noise_reduction: { type: "far_field" }` so coughs, room noise, and mic bleed are less likely to trigger false turns. Response interruption stays disabled, and rolling conversation context is limited with retention-ratio truncation to reduce long-session slowdown.
 
-The stage instructions include a specific human-versus-AI banter cue for lines like `only a human could present this slide` and `no no no, a human is best for this job`.
+The stage instructions include a specific human-versus-AI banter cue: first push back on `only a human could present this slide`, then if Keaton pushes back that a human is best, playfully accuse him that the slides were made with AI too.
+## Production
 
+For a reverse-proxied server, set `HOST=0.0.0.0` and an unused app port such as `PORT=3007`.
 
+```bash
+HOST=0.0.0.0 PORT=3007 npm start
+```
+
+Keep `OPENAI_API_KEY` in `.env` on the server. Do not expose it through Nginx or commit it to Git.
