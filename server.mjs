@@ -38,6 +38,11 @@ const sessionConfig = {
       noise_reduction: {
         type: 'far_field',
       },
+      transcription: {
+        model: 'gpt-4o-transcribe',
+        language: 'en',
+        prompt: 'Keaton is presenting with Critai, pronounced crit ay eye, as a live AI co-presenter for Criteo.',
+      },
       turn_detection: {
         type: 'semantic_vad',
         eagerness: 'high',

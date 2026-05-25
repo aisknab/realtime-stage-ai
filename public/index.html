@@ -70,7 +70,7 @@
 
       .controls {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 14px;
         margin-bottom: 24px;
       }
@@ -96,7 +96,36 @@
       #connectBtn { background: #41e1c6; }
       #askBtn { background: #f4d35e; }
       #muteBtn { background: #8ec5ff; }
+      #finaleBtn { background: #b8f06a; }
       #killBtn { background: #ff6868; }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 24px;
+      }
+
+      .metric {
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 14px 16px;
+      }
+
+      .metric span {
+        display: block;
+        color: #96a0ae;
+        font-size: 0.8rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 4px;
+        font-size: clamp(1.25rem, 2vw, 1.75rem);
+      }
 
       .panel {
         border: 1px solid rgba(255, 255, 255, 0.16);
@@ -140,6 +169,7 @@
         }
 
         .controls { grid-template-columns: 1fr; }
+        .metrics { grid-template-columns: 1fr; }
         button { min-height: 86px; }
       }
     </style>
@@ -158,7 +188,23 @@
         <button id="connectBtn" type="button">CONNECT AI</button>
         <button id="askBtn" type="button" disabled>ASK CRITAI</button>
         <button id="muteBtn" type="button" disabled>MUTE MIC TO AI</button>
+        <button id="finaleBtn" type="button" disabled>FINALE MODE</button>
         <button id="killBtn" type="button" disabled>KILL AI</button>
+      </section>
+
+      <section class="metrics" aria-label="Session metrics">
+        <div class="metric">
+          <span>Elapsed</span>
+          <strong id="elapsedText">00:00</strong>
+        </div>
+        <div class="metric">
+          <span>Context</span>
+          <strong id="contextText">0 items</strong>
+        </div>
+        <div class="metric">
+          <span>Mode</span>
+          <strong id="modeText">Standby</strong>
+        </div>
       </section>
 
       <section class="panel" aria-label="Realtime event log">
@@ -173,15 +219,37 @@
       const connectBtn = document.getElementById('connectBtn');
       const askBtn = document.getElementById('askBtn');
       const muteBtn = document.getElementById('muteBtn');
+      const finaleBtn = document.getElementById('finaleBtn');
       const killBtn = document.getElementById('killBtn');
       const statusText = document.getElementById('statusText');
+      const elapsedText = document.getElementById('elapsedText');
+      const contextText = document.getElementById('contextText');
+      const modeText = document.getElementById('modeText');
       const logEl = document.getElementById('log');
       const remoteAudio = document.getElementById('remoteAudio');
+
+      const FINALE_MODE_AFTER_MS = 24 * 60 * 1000;
+      const FINALE_KEEP_ITEMS = 8;
+      const TOKEN_PRUNE_THRESHOLD = 18000;
+      const ROLLING_MEMORY_KEEP_ITEMS = 4;
+      const ROLLING_MEMORY_MIN_ITEMS = 5;
 
       let peerConnection;
       let dataChannel;
       let localStream;
       let micMuted = false;
+      let sessionStartedAt = 0;
+      let timerId;
+      let finaleMode = false;
+      let lastPruneAt = 0;
+      let rollingSummary = '';
+      let summaryInFlight = false;
+      let pendingSummaryResponseId = null;
+      let pendingSummaryText = '';
+      let pendingSummaryItemIds = [];
+      const conversationItems = new Map();
+      const deletedItemIds = new Set();
+      const summaryItemIds = new Set();
 
       function setStatus(message) {
         statusText.textContent = message;
@@ -194,14 +262,306 @@
         logEl.scrollTop = logEl.scrollHeight;
       }
 
+      function formatElapsed(ms) {
+        const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+        const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+        const seconds = String(totalSeconds % 60).padStart(2, '0');
+        return `${minutes}:${seconds}`;
+      }
+
+      function refreshMetrics() {
+        const elapsedMs = sessionStartedAt ? Date.now() - sessionStartedAt : 0;
+        elapsedText.textContent = formatElapsed(elapsedMs);
+        contextText.textContent = `${conversationItems.size} items`;
+        modeText.textContent = finaleMode ? 'Finale' : sessionStartedAt ? 'Live' : 'Standby';
+        finaleBtn.disabled = !sessionStartedAt || finaleMode;
+
+        if (
+          sessionStartedAt &&
+          !finaleMode &&
+          elapsedMs >= FINALE_MODE_AFTER_MS &&
+          dataChannel?.readyState === 'open'
+        ) {
+          enterFinaleMode('timer');
+        }
+      }
+
+      function rememberConversationItem(item) {
+        if (!item?.id || deletedItemIds.has(item.id)) {
+          return;
+        }
+
+        const existing = conversationItems.get(item.id) || {};
+        conversationItems.set(item.id, {
+          ...existing,
+          id: item.id,
+          role: item.role || existing.role,
+          type: item.type || existing.type,
+          status: item.status || existing.status,
+          content: item.content || existing.content || [],
+          createdAt: existing.createdAt || Date.now(),
+          updatedAt: Date.now(),
+        });
+        refreshMetrics();
+      }
+
+      function rememberInputTranscript(payload) {
+        const item = conversationItems.get(payload.item_id);
+        if (!item) {
+          return;
+        }
+
+        const transcripts = { ...(item.transcripts || {}) };
+        transcripts[payload.content_index || 0] = payload.transcript || '';
+        conversationItems.set(item.id, {
+          ...item,
+          transcripts,
+          updatedAt: Date.now(),
+        });
+      }
+
+      function sendRealtimeEvent(event, label) {
+        if (!dataChannel || dataChannel.readyState !== 'open') {
+          log(`${label} ignored: data channel is not open`);
+          return false;
+        }
+
+        dataChannel.send(JSON.stringify(event));
+        log(label, event);
+        return true;
+      }
+
+      function pruneConversation(reason, keepItems = FINALE_KEEP_ITEMS) {
+        if (!dataChannel || dataChannel.readyState !== 'open') {
+          return;
+        }
+
+        const now = Date.now();
+        if (now - lastPruneAt < 5000) {
+          return;
+        }
+
+        const deletableItems = [...conversationItems.values()]
+          .filter((item) => item.status === 'completed' && item.role !== 'system' && !deletedItemIds.has(item.id))
+          .sort((a, b) => a.createdAt - b.createdAt);
+
+        const itemsToDelete = deletableItems.slice(0, Math.max(0, deletableItems.length - keepItems));
+
+        for (const item of itemsToDelete) {
+          sendRealtimeEvent(
+            {
+              type: 'conversation.item.delete',
+              item_id: item.id,
+            },
+            `Deleted old context item for ${reason}`
+          );
+          conversationItems.delete(item.id);
+          deletedItemIds.add(item.id);
+        }
+
+        if (itemsToDelete.length) {
+          lastPruneAt = now;
+          log(`Pruned ${itemsToDelete.length} old conversation items; kept ${keepItems} recent items`);
+          refreshMetrics();
+        }
+      }
+
+      function completedMemoryItems() {
+        return [...conversationItems.values()]
+          .filter((item) => item.status === 'completed' && item.role !== 'system' && !deletedItemIds.has(item.id))
+          .sort((a, b) => a.createdAt - b.createdAt);
+      }
+
+      function extractResponseText(response) {
+        return (response?.output || [])
+          .flatMap((item) => item.content || [])
+          .map((part) => part.text || part.transcript || '')
+          .join(' ')
+          .trim();
+      }
+
+      function scheduleRollingSummary(reason) {
+        if (summaryInFlight || !dataChannel || dataChannel.readyState !== 'open') {
+          return;
+        }
+
+        const items = completedMemoryItems();
+        if (items.length < ROLLING_MEMORY_MIN_ITEMS) {
+          return;
+        }
+
+        summaryInFlight = true;
+        pendingSummaryText = '';
+        pendingSummaryItemIds = items.map((item) => item.id);
+
+        const summaryInput = [
+          ...items.map((item) => ({
+            type: 'item_reference',
+            id: item.id,
+          })),
+          {
+            type: 'message',
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: [
+                  'Update the rolling stage-memory summary for Critai.',
+                  'Preserve only durable facts, decisions, audience-relevant context, callbacks, and unresolved cues.',
+                  'Drop filler, repeated wording, and obsolete detail.',
+                  'Keep it under 180 words.',
+                  rollingSummary ? `Previous rolling summary:\n${rollingSummary}` : 'Previous rolling summary: none yet.',
+                ].join('\n'),
+              },
+            ],
+          },
+        ];
+
+        const sent = sendRealtimeEvent(
+          {
+            type: 'response.create',
+            response: {
+              conversation: 'none',
+              output_modalities: ['text'],
+              max_output_tokens: 260,
+              metadata: {
+                response_purpose: 'rolling_summary',
+                reason,
+              },
+              input: summaryInput,
+              instructions:
+                'Return only the updated rolling summary text. Do not address Keaton. Do not include labels or markdown.',
+            },
+          },
+          `Rolling memory summary requested for ${reason}`
+        );
+
+        if (!sent) {
+          summaryInFlight = false;
+          pendingSummaryItemIds = [];
+        }
+      }
+
+      function applyRollingSummary(summaryText) {
+        const trimmedSummary = summaryText.trim();
+        if (!trimmedSummary) {
+          summaryInFlight = false;
+          pendingSummaryResponseId = null;
+          pendingSummaryText = '';
+          pendingSummaryItemIds = [];
+          return;
+        }
+
+        rollingSummary = trimmedSummary;
+
+        for (const itemId of summaryItemIds) {
+          if (deletedItemIds.has(itemId)) {
+            continue;
+          }
+
+          sendRealtimeEvent(
+            {
+              type: 'conversation.item.delete',
+              item_id: itemId,
+            },
+            'Deleted prior rolling memory item'
+          );
+          conversationItems.delete(itemId);
+          deletedItemIds.add(itemId);
+        }
+        summaryItemIds.clear();
+
+        const summaryItemId = `stage_memory_${Date.now()}`;
+        summaryItemIds.add(summaryItemId);
+
+        sendRealtimeEvent(
+          {
+            type: 'conversation.item.create',
+            item: {
+              id: summaryItemId,
+              type: 'message',
+              role: 'system',
+              content: [
+                {
+                  type: 'input_text',
+                  text: `Rolling stage memory for older presentation context:\n${rollingSummary}`,
+                },
+              ],
+            },
+          },
+          'Rolling memory item added'
+        );
+
+        const keepIds = new Set(completedMemoryItems().slice(-ROLLING_MEMORY_KEEP_ITEMS).map((item) => item.id));
+        const idsToDelete = pendingSummaryItemIds.filter(
+          (itemId) => !keepIds.has(itemId) && !summaryItemIds.has(itemId) && !deletedItemIds.has(itemId)
+        );
+
+        for (const itemId of idsToDelete) {
+          sendRealtimeEvent(
+            {
+              type: 'conversation.item.delete',
+              item_id: itemId,
+            },
+            'Deleted context item after rolling summary'
+          );
+          conversationItems.delete(itemId);
+          deletedItemIds.add(itemId);
+        }
+
+        log(`Rolling memory updated; deleted ${idsToDelete.length} older items`);
+        summaryInFlight = false;
+        pendingSummaryResponseId = null;
+        pendingSummaryText = '';
+        pendingSummaryItemIds = [];
+        refreshMetrics();
+      }
+
+      function enterFinaleMode(reason) {
+        if (finaleMode) {
+          pruneConversation(reason);
+          return;
+        }
+
+        finaleMode = true;
+        finaleBtn.textContent = 'FINALE ACTIVE';
+        refreshMetrics();
+
+        sendRealtimeEvent(
+          {
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role: 'system',
+              content: [
+                {
+                  type: 'input_text',
+                  text:
+                    'The presentation is in its final wrap-up. Keep context lightweight, answer only direct Critai cues, respond in one concise closing-stage beat, and hand back to Keaton.',
+                },
+              ],
+            },
+          },
+          `Finale mode enabled by ${reason}`
+        );
+
+        pruneConversation(reason, FINALE_KEEP_ITEMS);
+      }
+
       function setConnectedControls(connected) {
         connectBtn.disabled = connected;
         askBtn.disabled = !connected;
         muteBtn.disabled = !connected;
+        finaleBtn.disabled = !connected || finaleMode;
         killBtn.disabled = !connected;
       }
 
       function stopSession() {
+        if (timerId) {
+          clearInterval(timerId);
+          timerId = null;
+        }
+
         if (dataChannel) {
           dataChannel.close();
           dataChannel = null;
@@ -219,9 +579,22 @@
 
         remoteAudio.srcObject = null;
         micMuted = false;
+        sessionStartedAt = 0;
+        finaleMode = false;
+        lastPruneAt = 0;
+        rollingSummary = '';
+        summaryInFlight = false;
+        pendingSummaryResponseId = null;
+        pendingSummaryText = '';
+        pendingSummaryItemIds = [];
+        conversationItems.clear();
+        deletedItemIds.clear();
+        summaryItemIds.clear();
         muteBtn.textContent = 'MUTE MIC TO AI';
+        finaleBtn.textContent = 'FINALE MODE';
         setConnectedControls(false);
         setStatus('Offline');
+        refreshMetrics();
         log('Session closed');
       }
 
@@ -243,17 +616,71 @@
           dataChannel = peerConnection.createDataChannel('oai-events');
 
           dataChannel.addEventListener('open', () => {
+            sessionStartedAt = Date.now();
+            timerId = setInterval(refreshMetrics, 1000);
             setStatus('Connected');
             setConnectedControls(true);
+            refreshMetrics();
             log('Data channel open');
             log('Critai wake-cue auto-response enabled');
             log('Semantic VAD high + far-field noise reduction enabled');
+            log('Rolling memory enabled after each completed response');
+            log('Finale mode will trim old context after 24 minutes');
           });
 
           dataChannel.addEventListener('message', (event) => {
             try {
               const payload = JSON.parse(event.data);
               log(`Realtime event: ${payload.type || 'message'}`, payload);
+
+              if (payload.item) {
+                rememberConversationItem(payload.item);
+              }
+
+              if (
+                payload.type === 'response.created' &&
+                payload.response?.metadata?.response_purpose === 'rolling_summary'
+              ) {
+                pendingSummaryResponseId = payload.response.id;
+              }
+
+              if (
+                payload.type === 'conversation.item.input_audio_transcription.completed' &&
+                payload.item_id
+              ) {
+                rememberInputTranscript(payload);
+              }
+
+              if (payload.type === 'conversation.item.deleted' && payload.item_id) {
+                conversationItems.delete(payload.item_id);
+                deletedItemIds.add(payload.item_id);
+                refreshMetrics();
+              }
+
+              if (payload.type === 'response.output_text.delta' && payload.response_id === pendingSummaryResponseId) {
+                pendingSummaryText += payload.delta || '';
+              }
+
+              if (payload.type === 'response.output_text.done' && payload.response_id === pendingSummaryResponseId) {
+                pendingSummaryText = payload.text || pendingSummaryText;
+              }
+
+              if (payload.type === 'response.done') {
+                const purpose = payload.response?.metadata?.response_purpose;
+                if (purpose === 'rolling_summary') {
+                  applyRollingSummary(pendingSummaryText || extractResponseText(payload.response));
+                  return;
+                }
+
+                const inputTokens = payload.response?.usage?.input_tokens || 0;
+                if (inputTokens >= TOKEN_PRUNE_THRESHOLD) {
+                  enterFinaleMode(`token threshold ${inputTokens}`);
+                } else if (finaleMode) {
+                  pruneConversation('finale maintenance');
+                }
+
+                scheduleRollingSummary(`response ${payload.response?.id || 'completed'}`);
+              }
             } catch {
               log('Realtime message', event.data);
             }
@@ -327,12 +754,13 @@
           response: {
             output_modalities: ['audio'],
             instructions:
-              "Respond now to Keaton's latest cue as Critai. Be concise, stage-ready, and hand back to Keaton.",
+              finaleMode
+                ? "Respond now to Keaton's latest cue as Critai. This is the wrap-up, so use one concise closing-stage beat and hand back to Keaton."
+                : "Respond now to Keaton's latest cue as Critai. Be concise, stage-ready, and hand back to Keaton.",
           },
         };
 
-        dataChannel.send(JSON.stringify(event));
-        log('ASK CRITAI sent', event);
+        sendRealtimeEvent(event, 'ASK CRITAI sent');
       }
 
       function toggleMute() {
@@ -351,6 +779,7 @@
       connectBtn.addEventListener('click', connectAi);
       askBtn.addEventListener('click', askAi);
       muteBtn.addEventListener('click', toggleMute);
+      finaleBtn.addEventListener('click', () => enterFinaleMode('manual control'));
       killBtn.addEventListener('click', stopSession);
     </script>
   </body>
