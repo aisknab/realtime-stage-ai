@@ -246,8 +246,8 @@
             setStatus('Connected');
             setConnectedControls(true);
             log('Data channel open');
-            log('Voice auto-response enabled');
-            log('Semantic VAD high + far-field noise reduction enabled');
+            log('Assistant wake-cue auto-response enabled');
+            log('Semantic VAD low + far-field noise reduction enabled');
           });
 
           dataChannel.addEventListener('message', (event) => {
