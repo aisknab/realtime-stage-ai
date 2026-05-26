@@ -29,7 +29,7 @@ const sessionConfig = {
   type: 'realtime',
   model: 'gpt-realtime-2',
   output_modalities: ['audio'],
-  max_output_tokens: 450,
+  max_output_tokens: 'inf',
   truncation: {
     type: 'retention_ratio',
     retention_ratio: 0.8,
@@ -77,6 +77,9 @@ const sessionConfig = {
     'Do not respond during filler words like um, ah, so, or mid-sentence pauses.',
     'Ignore coughs, throat-clears, breaths, mic bumps, audience noise, and other non-word sounds; they are not cues to respond.',
     'Ignore applause and clapping as non-word audience noise. If applause follows a valid Critai cue or the human-vs-AI stage bit, do not respond to the applause itself; answer the prior spoken cue once the speech turn is available.',
+    'Default to short, useful responses: 1-3 sentences, roughly 8-14 seconds spoken, unless Keaton explicitly asks for more.',
+    'Every response must add something useful: a concrete point, sharp synthesis, practical implication, callback, or stage-ready framing. Avoid vanity lines, generic encouragement, filler, throat-clearing, and repeating the question.',
+    'Do not let brevity create fragments. Finish the current sentence cleanly, then hand back to Keaton.',
     'Keep responses under 20 seconds unless asked otherwise.',
     'Do not ask open-ended questions.',
     'Always hand back to Keaton.',

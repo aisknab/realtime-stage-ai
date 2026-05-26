@@ -689,6 +689,12 @@
 
               if (payload.type === 'response.done') {
                 const purpose = payload.response?.metadata?.response_purpose;
+                const status = payload.response?.status || 'unknown';
+                const statusReason = payload.response?.status_details?.reason || 'none';
+                const outputTokens = payload.response?.usage?.output_tokens || 0;
+                const responseLabel = purpose === 'rolling_summary' ? 'Rolling summary' : 'Spoken response';
+                log(`${responseLabel} finished: ${status}; reason: ${statusReason}; output tokens: ${outputTokens}`);
+
                 if (purpose === 'rolling_summary') {
                   applyRollingSummary(pendingSummaryText || extractResponseText(payload.response));
                   return;
