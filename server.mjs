@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
 const host = process.env.HOST || '127.0.0.1';
-const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${port}`;
+const publicBaseUrl = (process.env.PUBLIC_BASE_URL || `http://localhost:${port}`).replace(/\/+$/, '');
 const ouraTokenFile = path.join(__dirname, 'oura-tokens.json');
 const ouraAuthorizeUrl = 'https://cloud.ouraring.com/oauth/authorize';
 const ouraTokenUrl = 'https://api.ouraring.com/oauth/token';
@@ -64,11 +64,23 @@ function cleanupOuraOauthStates() {
 }
 
 function getOuraOAuthConfig() {
+  const configuredRedirectUri = process.env.OURA_REDIRECT_URI || `${publicBaseUrl}/oura/callback`;
+
   return {
     clientId: process.env.OURA_CLIENT_ID,
     clientSecret: process.env.OURA_CLIENT_SECRET,
-    redirectUri: process.env.OURA_REDIRECT_URI || `${publicBaseUrl}/oura/callback`,
+    redirectUri: normalizeOuraRedirectUri(configuredRedirectUri),
   };
+}
+
+function normalizeOuraRedirectUri(redirectUri) {
+  try {
+    const parsedUrl = new URL(redirectUri);
+    parsedUrl.pathname = parsedUrl.pathname.replace(/\/+/g, '/');
+    return parsedUrl.toString();
+  } catch {
+    return redirectUri;
+  }
 }
 
 function getOuraStaticOAuthConfig() {
