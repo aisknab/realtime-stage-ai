@@ -70,7 +70,7 @@
 
       .controls {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         gap: 14px;
         margin-bottom: 24px;
       }
@@ -94,6 +94,7 @@
       }
 
       #connectBtn { background: #41e1c6; }
+      #ouraBtn { background: #f8b37f; }
       #askBtn { background: #f4d35e; }
       #muteBtn { background: #8ec5ff; }
       #finaleBtn { background: #b8f06a; }
@@ -157,6 +158,10 @@
         margin-top: 18px;
       }
 
+      @media (max-width: 1040px) {
+        .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
+
       @media (max-width: 820px) {
         header {
           align-items: stretch;
@@ -186,6 +191,7 @@
 
       <section class="controls" aria-label="Stage AI controls">
         <button id="connectBtn" type="button">CONNECT AI</button>
+        <button id="ouraBtn" type="button">CONNECT OURA</button>
         <button id="askBtn" type="button" disabled>ASK CRITAI</button>
         <button id="muteBtn" type="button" disabled>MUTE MIC TO AI</button>
         <button id="finaleBtn" type="button" disabled>FINALE MODE</button>
@@ -217,6 +223,7 @@
 
     <script>
       const connectBtn = document.getElementById('connectBtn');
+      const ouraBtn = document.getElementById('ouraBtn');
       const askBtn = document.getElementById('askBtn');
       const muteBtn = document.getElementById('muteBtn');
       const finaleBtn = document.getElementById('finaleBtn');
@@ -233,6 +240,7 @@
       const TOKEN_PRUNE_THRESHOLD = 18000;
       const ROLLING_MEMORY_KEEP_ITEMS = 4;
       const ROLLING_MEMORY_MIN_ITEMS = 5;
+      const OURA_FUNCTION_NAME = 'get_oura_heart_rate';
       const FAST_FINALE_TURN_DETECTION = {
         type: 'server_vad',
         threshold: 0.5,
@@ -261,6 +269,31 @@
 
       function setStatus(message) {
         statusText.textContent = message;
+      }
+
+      async function refreshOuraStatus() {
+        try {
+          const response = await fetch('/oura/status');
+          const status = await response.json();
+
+          if (status.connected) {
+            ouraBtn.textContent = 'OURA CONNECTED';
+            ouraBtn.disabled = false;
+            return;
+          }
+
+          if (status.oauth_configured) {
+            ouraBtn.textContent = 'CONNECT OURA';
+            ouraBtn.disabled = false;
+            return;
+          }
+
+          ouraBtn.textContent = 'OURA SETUP NEEDED';
+          ouraBtn.disabled = true;
+        } catch {
+          ouraBtn.textContent = 'OURA STATUS ERROR';
+          ouraBtn.disabled = true;
+        }
       }
 
       function log(message, details) {
@@ -337,6 +370,86 @@
         dataChannel.send(JSON.stringify(event));
         log(label, event);
         return true;
+      }
+
+      function parseFunctionArguments(rawArguments) {
+        if (!rawArguments) {
+          return {};
+        }
+
+        try {
+          return JSON.parse(rawArguments);
+        } catch {
+          return {};
+        }
+      }
+
+      async function fetchOuraHeartRate(args) {
+        const lookbackHours = Number.isFinite(Number(args.lookback_hours)) ? Number(args.lookback_hours) : 24;
+        const response = await fetch(`/oura/heart-rate?lookback_hours=${encodeURIComponent(lookbackHours)}`);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          return {
+            available: false,
+            error: payload.error || `Local Oura endpoint failed with HTTP ${response.status}`,
+            connect_url: payload.connect_url || '/oura/connect',
+          };
+        }
+
+        return payload;
+      }
+
+      async function runRealtimeFunction(functionCall) {
+        const args = parseFunctionArguments(functionCall.arguments);
+
+        if (functionCall.name !== OURA_FUNCTION_NAME) {
+          return {
+            available: false,
+            error: `Unknown function: ${functionCall.name}`,
+          };
+        }
+
+        return fetchOuraHeartRate(args);
+      }
+
+      async function handleFunctionCalls(functionCalls) {
+        for (const functionCall of functionCalls) {
+          let output;
+
+          try {
+            output = await runRealtimeFunction(functionCall);
+          } catch (error) {
+            output = {
+              available: false,
+              error: error instanceof Error ? error.message : 'Unknown function error',
+            };
+          }
+
+          sendRealtimeEvent(
+            {
+              type: 'conversation.item.create',
+              item: {
+                type: 'function_call_output',
+                call_id: functionCall.call_id,
+                output: JSON.stringify(output),
+              },
+            },
+            `Function output sent for ${functionCall.name}`
+          );
+        }
+
+        sendRealtimeEvent(
+          {
+            type: 'response.create',
+            response: {
+              output_modalities: ['audio'],
+              instructions:
+                'Use the Oura function output to answer Keaton in one concise, factual line. Include the BPM and how recent the sample is when available. If unavailable, say Oura is not connected or has no recent sample; do not give medical advice.',
+            },
+          },
+          'Response requested after function output'
+        );
       }
 
       function pruneConversation(reason, keepItems = FINALE_KEEP_ITEMS) {
@@ -692,6 +805,14 @@
                 const status = payload.response?.status || 'unknown';
                 const statusReason = payload.response?.status_details?.reason || 'none';
                 const outputTokens = payload.response?.usage?.output_tokens || 0;
+
+                const functionCalls = (payload.response?.output || []).filter((item) => item.type === 'function_call');
+                if (functionCalls.length) {
+                  log(`Function call requested: ${functionCalls.map((item) => item.name).join(', ')}`);
+                  void handleFunctionCalls(functionCalls);
+                  return;
+                }
+
                 const responseLabel = purpose === 'rolling_summary' ? 'Rolling summary' : 'Spoken response';
                 log(`${responseLabel} finished: ${status}; reason: ${statusReason}; output tokens: ${outputTokens}`);
 
@@ -805,10 +926,14 @@
       }
 
       connectBtn.addEventListener('click', connectAi);
+      ouraBtn.addEventListener('click', () => {
+        window.location.href = '/oura/connect';
+      });
       askBtn.addEventListener('click', askAi);
       muteBtn.addEventListener('click', toggleMute);
       finaleBtn.addEventListener('click', () => enterFinaleMode('manual control'));
       killBtn.addEventListener('click', stopSession);
+      refreshOuraStatus();
     </script>
   </body>
 </html>

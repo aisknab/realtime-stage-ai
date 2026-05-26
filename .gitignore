@@ -1,5 +1,6 @@
 ﻿.env
 environment.env
+oura-tokens.json
 node_modules/
 npm-debug.log*
 .server.*.log
