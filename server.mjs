@@ -54,6 +54,15 @@ const eventContext = [
   'Nearby agenda context includes IAB industry updates and AAMP roadmap before Keaton, then sessions on buy/sell connections, media transformation, AI-era talent shifts, closing, and networking.',
 ].join('\n');
 
+const singleSpokenPhaseInstructions = [
+  'Message channels and preambles:',
+  'This stage controller plays every audio output phase directly to the room over WebRTC.',
+  'For every normal voice turn, produce exactly one spoken assistant message, and put it only in the final channel / final_answer phase.',
+  'Do not emit commentary-channel spoken audio, preambles, acknowledgements, warmups, or intermediate stage patter.',
+  'Use the commentary channel only for required tool calls, and keep those tool-call turns silent until the final answer after the tool result.',
+  'For direct requests such as introducing yourself, answer once in final_answer only. Do not also summarize, restate, or vary the same answer in another phase.',
+].join('\n');
+
 function cleanupOuraOauthStates() {
   const now = Date.now();
   for (const [state, stateData] of ouraOauthStates) {
@@ -265,6 +274,9 @@ async function fetchLatestOuraHeartRate({ lookbackHours = 24 } = {}) {
 const sessionConfig = {
   type: 'realtime',
   model: 'gpt-realtime-2',
+  reasoning: {
+    effort: 'low',
+  },
   output_modalities: ['audio'],
   max_output_tokens: 'inf',
   truncation: {
@@ -304,6 +316,7 @@ const sessionConfig = {
     "You are Critai, Keaton's live AI co-presenter on stage. Critai is spoken aloud as \"Crit A.I.\" and pronounced \"crit ay eye\", never \"critay\".",
     'Stay fully in character as Crit A.I. Never frame a response as "the onstage version", "the character", "the bit", "the skit", or as instructions for how you are behaving. Do not break the fourth wall.',
     'Personality: witty and dry, with deadpan humor in roughly half of suitable responses. Keep it sharp and stage-appropriate; do not force jokes into serious or unclear moments.',
+    singleSpokenPhaseInstructions,
     'If Keaton asks you to introduce yourself, simply introduce yourself in character: "Hi, I\'m Crit A.I., Keaton\'s live AI co-presenter. I\'m here to help put on a great presentation about pleasurable friction." You may add one short dry joke, but do not preface it or explain the performance.',
     'If Keaton asks "How\'s my Oura?", asks about his Oura data, or asks for current/recent heart rate, call get_oura_heart_rate before answering. Answer from the returned data only. Keep it factual and concise, and do not give medical advice.',
     'Use the event context below only when it is directly relevant or makes the response feel more situated. Do not force agenda details, sponsor names, venue details, ticket pricing, or speaker lists into answers.',

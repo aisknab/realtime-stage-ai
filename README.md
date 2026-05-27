@@ -74,6 +74,8 @@ The session uses `semantic_vad` with `eagerness: high` for responsive stage hand
 
 Critai is prompted to keep normal replies short, substantive, and stage-ready rather than being forced short with a hard output cap.
 
+Because `gpt-realtime-2` can produce both `commentary` and `final_answer` audio phases in one response, Critai is also prompted to keep normal turns to a single spoken `final_answer` phase. This avoids a direct cue being heard as a preamble plus a second final response on the WebRTC audio stream.
+
 For Oura questions, Critai has a `get_oura_heart_rate` Realtime function. When asked about Oura or current heart rate, the browser calls `/oura/heart-rate`, sends the function output back to the Realtime session, and Critai speaks a concise factual answer using the latest BPM sample.
 
 The stage instructions include a specific human-versus-AI banter cue: first push back on `only a human could present this slide`, then if Keaton pushes back that a human is best, playfully accuse him that the slides were made with AI too.

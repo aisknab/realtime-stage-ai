@@ -241,6 +241,8 @@
       const ROLLING_MEMORY_KEEP_ITEMS = 4;
       const ROLLING_MEMORY_MIN_ITEMS = 5;
       const OURA_FUNCTION_NAME = 'get_oura_heart_rate';
+      const FINAL_AUDIO_ONLY_INSTRUCTION =
+        'Produce exactly one spoken assistant message in the final_answer phase only. Do not emit commentary audio or a spoken preamble.';
       const FAST_FINALE_TURN_DETECTION = {
         type: 'server_vad',
         threshold: 0.5,
@@ -444,8 +446,10 @@
             type: 'response.create',
             response: {
               output_modalities: ['audio'],
-              instructions:
+              instructions: [
+                FINAL_AUDIO_ONLY_INSTRUCTION,
                 'Use the Oura function output to answer Keaton in one concise, factual line. Include the BPM and how recent the sample is when available. If unavailable, say Oura is not connected or has no recent sample; do not give medical advice.',
+              ].join(' '),
             },
           },
           'Response requested after function output'
@@ -658,7 +662,7 @@
                 {
                   type: 'input_text',
                   text:
-                    'The presentation is in its final wrap-up. Keep context lightweight, answer only direct Critai cues, respond in one concise closing-stage beat, and hand back to Keaton.',
+                    `The presentation is in its final wrap-up. ${FINAL_AUDIO_ONLY_INSTRUCTION} Keep context lightweight, answer only direct Critai cues, respond in one concise closing-stage beat, and hand back to Keaton.`,
                 },
               ],
             },
@@ -902,10 +906,12 @@
           type: 'response.create',
           response: {
             output_modalities: ['audio'],
-            instructions:
+            instructions: [
+              FINAL_AUDIO_ONLY_INSTRUCTION,
               finaleMode
                 ? "Respond now to Keaton's latest cue as Critai. This is the wrap-up, so use one concise closing-stage beat and hand back to Keaton."
                 : "Respond now to Keaton's latest cue as Critai. Be concise, stage-ready, and hand back to Keaton.",
+            ].join(' '),
           },
         };
 
