@@ -400,6 +400,8 @@
         const requestWords =
           '(?:what|explain|jump|can|could|tell|give|how|why|when|where|do|does|should|would|introduce|check|please)';
         const directCueSuffix = `(?=\\s*[,;:]|\\s+${requestWords}\\b|\\s*$)`;
+        const postNameRequest =
+          '(?:(?:so|now|okay|ok)\\s*,?\\s+)?(?:please\\s+)?(?:introduce\\s+yourself|say\\s+hello|jump\\s+in|take\\s+it(?:\\s+away)?|tell\\s+(?:them|us)\\s+who\\s+you\\s+are)';
         const directAddressPatterns = [
           new RegExp(`^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${wakeName}\\b${directCueSuffix}`, 'i'),
           new RegExp(
@@ -412,6 +414,8 @@
           new RegExp(`[,;:]\\s*${criteoAiName}\\b`, 'i'),
           new RegExp(`\\b(?:hey|hi|yo)\\s+${wakeName}\\b`, 'i'),
           new RegExp(`\\b(?:hey|hi|yo)\\s+${criteoAiName}\\b`, 'i'),
+          new RegExp(`\\b${wakeName}\\b\\s*[.!?]\\s*${postNameRequest}\\b`, 'i'),
+          new RegExp(`\\b${criteoAiName}\\b\\s*[.!?]\\s*${postNameRequest}\\b`, 'i'),
         ];
 
         return directAddressPatterns.some((pattern) => pattern.test(text));
