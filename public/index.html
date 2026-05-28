@@ -397,15 +397,17 @@
 
         const wakeName = '(?:crit\\s*a\\.?\\s*i\\.?|critai|crite\\s*ai|krit\\s*ai|crit\\s*ay\\s*eye)';
         const criteoAiName = 'criteo\\s*ai';
-        const requestWords = '(?:what|explain|jump|can|could|tell|give|how|why|when|where|do|does|should|would|introduce|check)';
+        const requestWords =
+          '(?:what|explain|jump|can|could|tell|give|how|why|when|where|do|does|should|would|introduce|check|please)';
+        const directCueSuffix = `(?=\\s*[,;:]|\\s+${requestWords}\\b|\\s*$)`;
         const directAddressPatterns = [
-          new RegExp(`^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${wakeName}\\b`, 'i'),
+          new RegExp(`^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${wakeName}\\b${directCueSuffix}`, 'i'),
           new RegExp(
-            `^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${criteoAiName}\\b(?=\\s*[,;:]|\\s+${requestWords}\\b|$)`,
+            `^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${criteoAiName}\\b${directCueSuffix}`,
             'i'
           ),
-          new RegExp(`[.!?]\\s*(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+)?${wakeName}\\b`, 'i'),
-          new RegExp(`[.!?]\\s*(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+)?${criteoAiName}\\b`, 'i'),
+          new RegExp(`[.!?]\\s*(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+)?${wakeName}\\b${directCueSuffix}`, 'i'),
+          new RegExp(`[.!?]\\s*(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+)?${criteoAiName}\\b${directCueSuffix}`, 'i'),
           new RegExp(`[,;:]\\s*${wakeName}\\b`, 'i'),
           new RegExp(`[,;:]\\s*${criteoAiName}\\b`, 'i'),
           new RegExp(`\\b(?:hey|hi|yo)\\s+${wakeName}\\b`, 'i'),
@@ -469,7 +471,7 @@
             type: 'wake_cue',
             label: 'Critai wake phrase',
             instruction:
-              'The latest transcript contains a direct Critai wake cue. Answer only that latest cue as Critai, be concise and stage-ready, then stop.',
+              'The latest transcript contains a direct Crit A.I. wake cue. Answer only that latest cue as Crit A.I., be concise and stage-ready, then stop. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai".',
           };
         }
 
@@ -879,10 +881,10 @@
               {
                 type: 'input_text',
                 text: [
-                  'Update the rolling stage-memory summary for Critai.',
+                  'Update the rolling stage-memory summary for Crit A.I.',
                   'Preserve only durable facts, decisions, audience-relevant context, callbacks, and unresolved cues.',
                   'Drop filler, repeated wording, and obsolete detail.',
-                  'Do not preserve literal handoff phrases such as "handing back to Keaton"; summarize cueing only as "speaks only on explicit cue" when needed.',
+                  'Do not preserve literal handoff phrases such as "handing back to Keaton"; summarize cueing only as "speaks only on explicit Crit A.I. cue" when needed.',
                   'Keep it under 140 words and finish with a complete sentence.',
                   rollingSummary ? `Previous rolling summary:\n${rollingSummary}` : 'Previous rolling summary: none yet.',
                 ].join('\n'),
@@ -1011,7 +1013,7 @@
                 {
                   type: 'input_text',
                   text:
-                    `The presentation is in its final wrap-up. ${FINAL_AUDIO_ONLY_INSTRUCTION} Keep context lightweight, answer only direct Critai cues, respond in one concise closing-stage beat, then stop speaking so Keaton can continue. Do not give an empty handoff.`,
+                    `The presentation is in its final wrap-up. ${FINAL_AUDIO_ONLY_INSTRUCTION} Keep context lightweight, answer only direct Crit A.I. cues, respond in one concise closing-stage beat, then stop speaking so Keaton can continue. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.`,
                 },
               ],
             },
@@ -1352,8 +1354,8 @@
             instructions: [
               FINAL_AUDIO_ONLY_INSTRUCTION,
               finaleMode
-                ? "Respond now to Keaton's latest cue as Critai. This is the wrap-up, so use one concise closing-stage beat, then stop speaking. Do not give an empty handoff."
-                : "Respond now to Keaton's latest cue as Critai. Be concise and stage-ready, then stop speaking. Do not give an empty handoff.",
+                ? 'Respond now to Keaton\'s latest cue as Crit A.I. This is the wrap-up, so use one concise closing-stage beat, then stop speaking. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.'
+                : 'Respond now to Keaton\'s latest cue as Crit A.I. Be concise and stage-ready, then stop speaking. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.',
             ].join(' '),
           },
         };
