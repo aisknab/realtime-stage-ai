@@ -414,6 +414,8 @@
           new RegExp(`[,;:]\\s*${criteoAiName}\\b`, 'i'),
           new RegExp(`\\b(?:hey|hi|yo)\\s+${wakeName}\\b`, 'i'),
           new RegExp(`\\b(?:hey|hi|yo)\\s+${criteoAiName}\\b`, 'i'),
+          new RegExp(`\\b${wakeName}\\b\\s*[,;:]\\s*${postNameRequest}\\b`, 'i'),
+          new RegExp(`\\b${criteoAiName}\\b\\s*[,;:]\\s*${postNameRequest}\\b`, 'i'),
           new RegExp(`\\b${wakeName}\\b\\s*[.!?]\\s*${postNameRequest}\\b`, 'i'),
           new RegExp(`\\b${criteoAiName}\\b\\s*[.!?]\\s*${postNameRequest}\\b`, 'i'),
         ];
