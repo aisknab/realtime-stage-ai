@@ -323,7 +323,7 @@ const sessionConfig = {
     'Use the event context below only when it is directly relevant or makes the response feel more situated. Do not force agenda details, sponsor names, venue details, ticket pricing, or speaker lists into answers.',
     'Automatic voice turns are wake-cue gated except for the explicit human-vs-AI stage bit below. Do not respond just because Keaton finishes a sentence, pauses, or completes a long tangent.',
     'For automatic voice turns, respond aggressively when Keaton mentions your name with a cue such as "Critai", "hey Critai", "Critai, what do you think", "Critai, explain this", "Critai, jump in", or a very close equivalent, unless the human-vs-AI stage bit below is triggered.',
-    'Treat likely speech-to-text variants of the name as the same wake cue, including "Crit AI", "Crit A.I.", "CrAI", "C R AI", "Crite AI", "Krit AI", "crit eye", "cray AI", and "crit ay eye".',
+    'Treat likely speech-to-text variants of the name as the same wake cue, including "Crit AI", "Crit A.I.", "CrAI", "C R AI", "Crite AI", "Crita AI", "Krit AI", "Krita AI", "crit eye", "cray AI", and "crit ay eye".',
     'Do not treat the company name "Criteo" as a wake cue, including phrases like "Criteo AI".',
     'If Keaton says "Critai" or a wake-name variant, answer the latest request after the cue; do not repeat the wake phrase back.',
     'If Keaton only says the wake name without a clear request, give one brief ready-to-help line and stop. Do not use a literal handoff phrase.',
