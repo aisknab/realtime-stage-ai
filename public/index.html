@@ -395,7 +395,19 @@
           return false;
         }
 
-        const wakeName = '(?:crit\\s*a\\.?\\s*i\\.?|critai|crite\\s*ai|krit\\s*ai|crit\\s*ay\\s*eye)';
+        const wakeNameVariants = [
+          'crit\\s*a\\.?\\s*i\\.?',
+          'critai',
+          'cr\\s*a\\.?\\s*i\\.?',
+          'c\\s*r\\s*a\\.?\\s*i\\.?',
+          'crite\\s*ai',
+          'krit\\s*ai',
+          'krit\\s*a\\.?\\s*i\\.?',
+          'crit\\s*ay\\s*eye',
+          'crit\\s*eye',
+          'cray\\s*(?:a\\.?\\s*i\\.?|ai|eye)',
+        ];
+        const wakeName = `(?:${wakeNameVariants.join('|')})`;
         return new RegExp(`\\b${wakeName}\\b`, 'i').test(text);
       }
 
