@@ -274,6 +274,8 @@
       const deletedItemIds = new Set();
       const summaryItemIds = new Set();
       const activeResponseIds = new Set();
+      const summaryResponseIds = new Set();
+      const summaryOutputItemIds = new Set();
       const activeSpokenResponseIds = new Set();
       const activeOutputAudioResponseIds = new Set();
 
@@ -340,7 +342,7 @@
       }
 
       function rememberConversationItem(item) {
-        if (!item?.id || deletedItemIds.has(item.id)) {
+        if (!item?.id || deletedItemIds.has(item.id) || summaryOutputItemIds.has(item.id)) {
           return;
         }
 
@@ -386,6 +388,30 @@
 
       function shouldLogRealtimePayload(payload) {
         return typeof payload?.type !== 'string' || !payload.type.endsWith('.delta');
+      }
+
+      function extractInvalidDeleteItemId(error) {
+        const match = String(error?.message || '').match(/id '([^']+)'/);
+        return match?.[1];
+      }
+
+      function handleRealtimeError(payload) {
+        if (payload?.type !== 'error') {
+          return false;
+        }
+
+        if (payload.error?.code === 'item_delete_invalid_item_id') {
+          const itemId = extractInvalidDeleteItemId(payload.error);
+          if (itemId) {
+            conversationItems.delete(itemId);
+            deletedItemIds.add(itemId);
+            refreshMetrics();
+          }
+          log(`Delete skipped: ${itemId || 'item'} is already absent on server`);
+          return true;
+        }
+
+        return false;
       }
 
       function cancelInFlightResponses() {
@@ -658,6 +684,7 @@
                   'Update the rolling stage-memory summary for Critai.',
                   'Preserve only durable facts, decisions, audience-relevant context, callbacks, and unresolved cues.',
                   'Drop filler, repeated wording, and obsolete detail.',
+                  'Do not preserve literal handoff phrases such as "handing back to Keaton"; summarize cueing only as "speaks only on explicit cue" when needed.',
                   'Keep it under 140 words and finish with a complete sentence.',
                   rollingSummary ? `Previous rolling summary:\n${rollingSummary}` : 'Previous rolling summary: none yet.',
                 ].join('\n'),
@@ -786,7 +813,7 @@
                 {
                   type: 'input_text',
                   text:
-                    `The presentation is in its final wrap-up. ${FINAL_AUDIO_ONLY_INSTRUCTION} Keep context lightweight, answer only direct Critai cues, respond in one concise closing-stage beat, and hand back to Keaton.`,
+                    `The presentation is in its final wrap-up. ${FINAL_AUDIO_ONLY_INSTRUCTION} Keep context lightweight, answer only direct Critai cues, respond in one concise closing-stage beat, then stop speaking so Keaton can continue. Do not give an empty handoff.`,
                 },
               ],
             },
@@ -857,6 +884,8 @@
         deletedItemIds.clear();
         summaryItemIds.clear();
         activeResponseIds.clear();
+        summaryResponseIds.clear();
+        summaryOutputItemIds.clear();
         activeSpokenResponseIds.clear();
         activeOutputAudioResponseIds.clear();
         if (aiAudioGateReleaseTimerId) {
@@ -911,6 +940,27 @@
 
             try {
               const payload = JSON.parse(event.data);
+              if (handleRealtimeError(payload)) {
+                return;
+              }
+
+              if (
+                payload.type === 'response.created' &&
+                payload.response?.metadata?.response_purpose === 'rolling_summary' &&
+                payload.response.id
+              ) {
+                pendingSummaryResponseId = payload.response.id;
+                summaryResponseIds.add(payload.response.id);
+              }
+
+              if (
+                payload.type === 'response.output_item.added' &&
+                summaryResponseIds.has(payload.response_id) &&
+                payload.item?.id
+              ) {
+                summaryOutputItemIds.add(payload.item.id);
+              }
+
               if (shouldLogRealtimePayload(payload)) {
                 log(`Realtime event: ${payload.type || 'message'}`, payload);
               }
@@ -921,13 +971,6 @@
 
               if (payload.type === 'response.created' && payload.response?.id) {
                 activeResponseIds.add(payload.response.id);
-              }
-
-              if (
-                payload.type === 'response.created' &&
-                payload.response?.metadata?.response_purpose === 'rolling_summary'
-              ) {
-                pendingSummaryResponseId = payload.response.id;
               }
 
               if (payload.type === 'response.created') {
@@ -1096,8 +1139,8 @@
             instructions: [
               FINAL_AUDIO_ONLY_INSTRUCTION,
               finaleMode
-                ? "Respond now to Keaton's latest cue as Critai. This is the wrap-up, so use one concise closing-stage beat and hand back to Keaton."
-                : "Respond now to Keaton's latest cue as Critai. Be concise, stage-ready, and hand back to Keaton.",
+                ? "Respond now to Keaton's latest cue as Critai. This is the wrap-up, so use one concise closing-stage beat, then stop speaking. Do not give an empty handoff."
+                : "Respond now to Keaton's latest cue as Critai. Be concise and stage-ready, then stop speaking. Do not give an empty handoff.",
             ].join(' '),
           },
         };
