@@ -470,7 +470,7 @@
             type: 'wake_cue',
             label: 'Critai wake phrase',
             instruction:
-              'The latest transcript contains a Crit A.I. wake-name mention. Treat that mention as a cue, answer the latest question or command as Crit A.I., be concise and stage-ready, then stop. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai".',
+              'The latest transcript contains a Crit A.I. wake-name mention. Treat that mention as a cue, answer the latest question or command in character, be concise and stage-ready, then stop. Do not start by saying your name unless the request is to introduce yourself or asks who you are. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai".',
           };
         }
 
@@ -1012,7 +1012,7 @@
                 {
                   type: 'input_text',
                   text:
-                    `The presentation is in its final wrap-up. ${FINAL_AUDIO_ONLY_INSTRUCTION} Keep context lightweight, answer only direct Crit A.I. cues, respond in one concise closing-stage beat, then stop speaking so Keaton can continue. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.`,
+                    `The presentation is in its final wrap-up. ${FINAL_AUDIO_ONLY_INSTRUCTION} Keep context lightweight, answer only Crit A.I. cues, respond in one concise closing-stage beat, then stop speaking so Keaton can continue. Do not start by saying your name unless the request is to introduce yourself or asks who you are. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.`,
                 },
               ],
             },
@@ -1353,8 +1353,8 @@
             instructions: [
               FINAL_AUDIO_ONLY_INSTRUCTION,
               finaleMode
-                ? 'Respond now to Keaton\'s latest cue as Crit A.I. This is the wrap-up, so use one concise closing-stage beat, then stop speaking. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.'
-                : 'Respond now to Keaton\'s latest cue as Crit A.I. Be concise and stage-ready, then stop speaking. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.',
+                ? 'Respond now to Keaton\'s latest cue in character. This is the wrap-up, so use one concise closing-stage beat, then stop speaking. Do not start by saying your name unless the request is to introduce yourself or asks who you are. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.'
+                : 'Respond now to Keaton\'s latest cue in character. Be concise and stage-ready, then stop speaking. Do not start by saying your name unless the request is to introduce yourself or asks who you are. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai". Do not give an empty handoff.',
             ].join(' '),
           },
         };
