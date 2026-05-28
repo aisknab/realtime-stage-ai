@@ -395,22 +395,23 @@
           return false;
         }
 
+        const nameBreak = '[\\s.\\-_/]*';
         const wakeNameVariants = [
-          'crit\\s*a\\.?\\s*i\\.?',
+          `crit${nameBreak}a${nameBreak}i`,
           'critai',
-          'cr\\s*a\\.?\\s*i\\.?',
-          'c\\s*r\\s*a\\.?\\s*i\\.?',
-          'crite\\s*ai',
-          'crita\\s*ai',
-          'critta\\s*ai',
-          'critt\\s*ai',
-          'krit\\s*ai',
-          'krita\\s*ai',
-          'kritta\\s*ai',
-          'krit\\s*a\\.?\\s*i\\.?',
-          'crit\\s*ay\\s*eye',
-          'crit\\s*eye',
-          'cray\\s*(?:a\\.?\\s*i\\.?|ai|eye)',
+          `cr${nameBreak}a${nameBreak}i`,
+          `c${nameBreak}r${nameBreak}a${nameBreak}i`,
+          `crite${nameBreak}ai`,
+          `crita${nameBreak}ai`,
+          `critta${nameBreak}ai`,
+          `critt${nameBreak}ai`,
+          `krit${nameBreak}ai`,
+          `krita${nameBreak}ai`,
+          `kritta${nameBreak}ai`,
+          `krit${nameBreak}a${nameBreak}i`,
+          `crit${nameBreak}ay${nameBreak}eye`,
+          `crit${nameBreak}eye`,
+          `cray${nameBreak}(?:a${nameBreak}i|ai|eye)`,
         ];
         const wakeName = `(?:${wakeNameVariants.join('|')})`;
         return new RegExp(`\\b${wakeName}\\b`, 'i').test(text);
