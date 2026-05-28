@@ -240,6 +240,7 @@
       const TOKEN_PRUNE_THRESHOLD = 18000;
       const ROLLING_MEMORY_KEEP_ITEMS = 4;
       const ROLLING_MEMORY_MIN_ITEMS = 5;
+      const AI_AUDIO_GATE_RELEASE_DELAY_MS = 800;
       const OURA_FUNCTION_NAME = 'get_oura_heart_rate';
       const FINAL_AUDIO_ONLY_INSTRUCTION =
         'Produce exactly one spoken assistant message in the final_answer phase only. Do not emit commentary audio or a spoken preamble.';
@@ -256,6 +257,8 @@
       let dataChannel;
       let localStream;
       let micMuted = false;
+      let aiAudioGateActive = false;
+      let aiAudioGateReleaseTimerId;
       let sessionStartedAt = 0;
       let timerId;
       let finaleMode = false;
@@ -268,6 +271,8 @@
       const conversationItems = new Map();
       const deletedItemIds = new Set();
       const summaryItemIds = new Set();
+      const activeSpokenResponseIds = new Set();
+      const activeOutputAudioResponseIds = new Set();
 
       function setStatus(message) {
         statusText.textContent = message;
@@ -372,6 +377,82 @@
         dataChannel.send(JSON.stringify(event));
         log(label, event);
         return true;
+      }
+
+      function syncMicTrackState() {
+        if (!localStream) {
+          return;
+        }
+
+        const shouldEnableMic = !micMuted && !aiAudioGateActive;
+        localStream.getAudioTracks().forEach((track) => {
+          track.enabled = shouldEnableMic;
+        });
+      }
+
+      function setAiAudioGate(active, reason) {
+        if (aiAudioGateReleaseTimerId) {
+          clearTimeout(aiAudioGateReleaseTimerId);
+          aiAudioGateReleaseTimerId = null;
+        }
+
+        if (active) {
+          if (!aiAudioGateActive) {
+            aiAudioGateActive = true;
+            syncMicTrackState();
+            log(`Mic gated while Critai is speaking${reason ? `: ${reason}` : ''}`);
+          }
+          return;
+        }
+
+        if (!aiAudioGateActive || activeSpokenResponseIds.size || activeOutputAudioResponseIds.size) {
+          return;
+        }
+
+        aiAudioGateReleaseTimerId = setTimeout(() => {
+          aiAudioGateReleaseTimerId = null;
+          aiAudioGateActive = false;
+          syncMicTrackState();
+          log(`Mic gate released${reason ? `: ${reason}` : ''}`);
+        }, AI_AUDIO_GATE_RELEASE_DELAY_MS);
+      }
+
+      function markSpokenResponseStarted(response) {
+        if (response?.metadata?.response_purpose === 'rolling_summary') {
+          return;
+        }
+
+        if (response?.id) {
+          activeSpokenResponseIds.add(response.id);
+        }
+        setAiAudioGate(true, response?.id ? `response ${response.id}` : 'response started');
+      }
+
+      function markSpokenResponseDone(response) {
+        if (response?.metadata?.response_purpose === 'rolling_summary') {
+          return;
+        }
+
+        if (response?.id) {
+          activeSpokenResponseIds.delete(response.id);
+        }
+        setAiAudioGate(false, response?.id ? `response ${response.id} done` : 'response done');
+      }
+
+      function markOutputAudioStarted(responseId) {
+        if (responseId) {
+          activeOutputAudioResponseIds.add(responseId);
+        }
+        setAiAudioGate(true, responseId ? `audio buffer ${responseId}` : 'audio buffer started');
+      }
+
+      function markOutputAudioStopped(responseId, eventType) {
+        if (responseId) {
+          activeOutputAudioResponseIds.delete(responseId);
+        } else {
+          activeOutputAudioResponseIds.clear();
+        }
+        setAiAudioGate(false, eventType === 'output_audio_buffer.cleared' ? 'audio buffer cleared' : 'audio buffer drained');
       }
 
       function parseFunctionArguments(rawArguments) {
@@ -729,6 +810,13 @@
         conversationItems.clear();
         deletedItemIds.clear();
         summaryItemIds.clear();
+        activeSpokenResponseIds.clear();
+        activeOutputAudioResponseIds.clear();
+        if (aiAudioGateReleaseTimerId) {
+          clearTimeout(aiAudioGateReleaseTimerId);
+          aiAudioGateReleaseTimerId = null;
+        }
+        aiAudioGateActive = false;
         muteBtn.textContent = 'MUTE MIC TO AI';
         finaleBtn.textContent = 'FINALE MODE';
         setConnectedControls(false);
@@ -783,6 +871,21 @@
                 pendingSummaryResponseId = payload.response.id;
               }
 
+              if (payload.type === 'response.created') {
+                markSpokenResponseStarted(payload.response);
+              }
+
+              if (payload.type === 'output_audio_buffer.started') {
+                markOutputAudioStarted(payload.response_id);
+              }
+
+              if (
+                payload.type === 'output_audio_buffer.stopped' ||
+                payload.type === 'output_audio_buffer.cleared'
+              ) {
+                markOutputAudioStopped(payload.response_id, payload.type);
+              }
+
               if (
                 payload.type === 'conversation.item.input_audio_transcription.completed' &&
                 payload.item_id
@@ -809,6 +912,7 @@
                 const status = payload.response?.status || 'unknown';
                 const statusReason = payload.response?.status_details?.reason || 'none';
                 const outputTokens = payload.response?.usage?.output_tokens || 0;
+                markSpokenResponseDone(payload.response);
 
                 const functionCalls = (payload.response?.output || []).filter((item) => item.type === 'function_call');
                 if (functionCalls.length) {
@@ -924,9 +1028,7 @@
         }
 
         micMuted = !micMuted;
-        localStream.getAudioTracks().forEach((track) => {
-          track.enabled = !micMuted;
-        });
+        syncMicTrackState();
         muteBtn.textContent = micMuted ? 'UNMUTE MIC TO AI' : 'MUTE MIC TO AI';
         log(micMuted ? 'Mic muted to AI' : 'Mic unmuted to AI');
       }
