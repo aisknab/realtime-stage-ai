@@ -68,9 +68,9 @@ http://localhost:3000
 
 ## Usage
 
-Click `CONNECT AI`, allow microphone access, and speak to the AI. The `ASK AI` button is still available as a manual cue, but normal spoken turns will trigger responses automatically.
+Click `CONNECT AI`, allow microphone access, and speak normally. The `ASK AI` button is still available as a manual cue, but ordinary presentation speech is transcribed without automatically creating an assistant response. The browser requests a spoken response only when the transcript contains a direct Critai wake cue, an Oura cue, or the configured human-versus-AI stage bit.
 
-The session uses `semantic_vad` with `eagerness: high` for responsive stage handoffs, plus `audio.input.noise_reduction: { type: "far_field" }` so coughs, room noise, and mic bleed are less likely to trigger false turns. While Critai is speaking, the browser also gates the outbound mic track until the WebRTC output audio buffer has drained, preventing speaker bleed from being sent back to the model. Finale mode switches to a faster silence-based VAD so the closing human-versus-AI bit lands quickly. Response interruption stays disabled, spoken responses use the model's full available output budget to avoid app-level mid-sentence cutoffs, and rolling conversation context is limited with retention-ratio truncation to reduce long-session slowdown.
+The session uses `semantic_vad` with `eagerness: high` and `create_response: false`, plus `audio.input.noise_reduction: { type: "far_field" }` so coughs, room noise, and mic bleed are less likely to trigger false turns. While Critai is speaking, the browser also gates the outbound mic track until the WebRTC output audio buffer has drained, preventing speaker bleed from being sent back to the model. Finale mode switches to a faster silence-based VAD, also with automatic responses disabled, so the browser can keep applying the same transcript gate. Response interruption stays disabled, spoken responses use the model's full available output budget to avoid app-level mid-sentence cutoffs, and rolling conversation context is limited with retention-ratio truncation to reduce long-session slowdown.
 
 Critai is prompted to keep normal replies short, substantive, and stage-ready rather than being forced short with a hard output cap.
 

@@ -250,9 +250,12 @@
         threshold: 0.5,
         prefix_padding_ms: 300,
         silence_duration_ms: 250,
-        create_response: true,
+        create_response: false,
         interrupt_response: false,
       };
+      const RECENT_SILENT_USER_ITEMS_TO_KEEP = 8;
+      const RECENT_AUTO_RESPONSE_ITEM_IDS = 6;
+      const HUMAN_VS_AI_FOLLOW_UP_WINDOW_MS = 90 * 1000;
 
       let peerConnection;
       let dataChannel;
@@ -270,6 +273,7 @@
       let pendingSummaryResponseId = null;
       let pendingSummaryText = '';
       let pendingSummaryItemIds = [];
+      let spokenResponseCreatePending = false;
       const conversationItems = new Map();
       const deletedItemIds = new Set();
       const summaryItemIds = new Set();
@@ -278,6 +282,8 @@
       const summaryOutputItemIds = new Set();
       const activeSpokenResponseIds = new Set();
       const activeOutputAudioResponseIds = new Set();
+      const recentAutoResponseItemIds = [];
+      let lastHumanVsAiCueAt = 0;
 
       function setStatus(message) {
         statusText.textContent = message;
@@ -375,6 +381,194 @@
         });
       }
 
+      function normalizeTranscript(transcript) {
+        return String(transcript || '')
+          .toLowerCase()
+          .replace(/[’`]/g, "'")
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      function hasWakeCue(transcript) {
+        const text = normalizeTranscript(transcript);
+        if (!text) {
+          return false;
+        }
+
+        const wakeName = '(?:crit\\s*a\\.?\\s*i\\.?|critai|crite\\s*ai|krit\\s*ai|crit\\s*ay\\s*eye)';
+        const criteoAiName = 'criteo\\s*ai';
+        const requestWords = '(?:what|explain|jump|can|could|tell|give|how|why|when|where|do|does|should|would|introduce|check)';
+        const directAddressPatterns = [
+          new RegExp(`^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${wakeName}\\b`, 'i'),
+          new RegExp(
+            `^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${criteoAiName}\\b(?=\\s*[,;:]|\\s+${requestWords}\\b|$)`,
+            'i'
+          ),
+          new RegExp(`[.!?]\\s*(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+)?${wakeName}\\b`, 'i'),
+          new RegExp(`[.!?]\\s*(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+)?${criteoAiName}\\b`, 'i'),
+          new RegExp(`[,;:]\\s*${wakeName}\\b`, 'i'),
+          new RegExp(`[,;:]\\s*${criteoAiName}\\b`, 'i'),
+          new RegExp(`\\b(?:hey|hi|yo)\\s+${wakeName}\\b`, 'i'),
+          new RegExp(`\\b(?:hey|hi|yo)\\s+${criteoAiName}\\b`, 'i'),
+        ];
+
+        return directAddressPatterns.some((pattern) => pattern.test(text));
+      }
+
+      function hasHumanVsAiPrimaryCue(transcript) {
+        const text = normalizeTranscript(transcript);
+        return (
+          /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+(?:present|connect|do|deliver|read)\b/.test(text) ||
+          /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+.*\b(?:audience|slide|room|stage)\b/.test(text)
+        );
+      }
+
+      function hasHumanVsAiFollowUpCue(transcript) {
+        if (!lastHumanVsAiCueAt || Date.now() - lastHumanVsAiCueAt > HUMAN_VS_AI_FOLLOW_UP_WINDOW_MS) {
+          return false;
+        }
+
+        const text = normalizeTranscript(transcript);
+        return (
+          /\bno\s+no\s+no\b/.test(text) ||
+          /\bhuman(?:s)?\s+(?:is|are|do|does|did|can)\s+.*\b(?:best|better)\b/.test(text) ||
+          /\ba\s+human\s+is\s+best\b/.test(text)
+        );
+      }
+
+      function hasOuraCue(transcript) {
+        const text = normalizeTranscript(transcript);
+        return (
+          /\b(?:how's|how is|check|what's|what is)\s+(?:my\s+)?oura\b/.test(text) ||
+          /\b(?:current|recent|latest)\s+(?:oura\s+)?heart\s+rate\b/.test(text)
+        );
+      }
+
+      function detectAutoResponseTrigger(transcript) {
+        if (hasHumanVsAiPrimaryCue(transcript)) {
+          lastHumanVsAiCueAt = Date.now();
+          return {
+            type: 'human_vs_ai_primary',
+            label: 'human-vs-AI stage cue',
+            instruction:
+              'The latest transcript matched the human-versus-AI stage bit. Respond to that latest turn immediately, playfully turn on Keaton, and stop.',
+          };
+        }
+
+        if (hasHumanVsAiFollowUpCue(transcript)) {
+          return {
+            type: 'human_vs_ai_follow_up',
+            label: 'human-vs-AI follow-up cue',
+            instruction:
+              'The latest transcript matched the human-versus-AI follow-up. Accuse Keaton playfully that the slides were made with AI too, make one concise point, and stop.',
+          };
+        }
+
+        if (hasWakeCue(transcript)) {
+          return {
+            type: 'wake_cue',
+            label: 'Critai wake phrase',
+            instruction:
+              'The latest transcript contains a direct Critai wake cue. Answer only that latest cue as Critai, be concise and stage-ready, then stop.',
+          };
+        }
+
+        if (hasOuraCue(transcript)) {
+          return {
+            type: 'oura_cue',
+            label: 'Oura cue',
+            instruction:
+              'The latest transcript asks for Oura or heart-rate data. Use the Oura tool before answering, keep it factual and concise, and do not give medical advice.',
+          };
+        }
+
+        return null;
+      }
+
+      function rememberAutoResponseItemId(itemId) {
+        if (!itemId) {
+          return;
+        }
+
+        recentAutoResponseItemIds.push(itemId);
+        while (recentAutoResponseItemIds.length > RECENT_AUTO_RESPONSE_ITEM_IDS) {
+          recentAutoResponseItemIds.shift();
+        }
+      }
+
+      function pruneSilentUserContext() {
+        const userItems = [...conversationItems.values()]
+          .filter((item) => item.status === 'completed' && item.role === 'user' && !deletedItemIds.has(item.id))
+          .sort((a, b) => a.createdAt - b.createdAt);
+
+        const itemsToDelete = userItems.slice(0, Math.max(0, userItems.length - RECENT_SILENT_USER_ITEMS_TO_KEEP));
+        for (const item of itemsToDelete) {
+          sendRealtimeEvent(
+            {
+              type: 'conversation.item.delete',
+              item_id: item.id,
+            },
+            'Deleted older uncued transcript item'
+          );
+          conversationItems.delete(item.id);
+          deletedItemIds.add(item.id);
+        }
+
+        if (itemsToDelete.length) {
+          log(`Pruned ${itemsToDelete.length} older uncued transcript items`);
+          refreshMetrics();
+        }
+      }
+
+      function requestAutoResponseForTranscript(payload) {
+        const transcript = payload.transcript || '';
+        const trigger = detectAutoResponseTrigger(transcript);
+        if (!trigger) {
+          log('Auto-response skipped: transcript did not match a wake phrase, Oura cue, or stage cue', {
+            item_id: payload.item_id,
+            transcript,
+          });
+          pruneSilentUserContext();
+          return;
+        }
+
+        if (recentAutoResponseItemIds.includes(payload.item_id)) {
+          return;
+        }
+
+        if (spokenResponseCreatePending || activeSpokenResponseIds.size || activeOutputAudioResponseIds.size) {
+          log(`Auto-response skipped for ${trigger.label}: another spoken response is still active`, {
+            item_id: payload.item_id,
+            transcript,
+          });
+          return;
+        }
+
+        rememberAutoResponseItemId(payload.item_id);
+        const sent = sendRealtimeEvent(
+          {
+            type: 'response.create',
+            response: {
+              output_modalities: ['audio'],
+              metadata: {
+                response_purpose: 'auto_cue',
+                trigger: trigger.type,
+                item_id: payload.item_id,
+              },
+              instructions: [
+                FINAL_AUDIO_ONLY_INSTRUCTION,
+                trigger.instruction,
+                finaleMode
+                  ? 'This is finale mode, so use one concise closing-stage beat and do not give an empty handoff.'
+                  : 'Do not give an empty handoff.',
+              ].join(' '),
+            },
+          },
+          `Auto-response requested for ${trigger.label}`
+        );
+        spokenResponseCreatePending = sent;
+      }
+
       function sendRealtimeEvent(event, label) {
         if (!dataChannel || dataChannel.readyState !== 'open') {
           log(`${label} ignored: data channel is not open`);
@@ -409,6 +603,10 @@
           }
           log(`Delete skipped: ${itemId || 'item'} is already absent on server`);
           return true;
+        }
+
+        if (payload.error?.code === 'conversation_already_has_active_response') {
+          spokenResponseCreatePending = false;
         }
 
         return false;
@@ -591,7 +789,7 @@
           );
         }
 
-        sendRealtimeEvent(
+        spokenResponseCreatePending = sendRealtimeEvent(
           {
             type: 'response.create',
             response: {
@@ -880,6 +1078,7 @@
         pendingSummaryResponseId = null;
         pendingSummaryText = '';
         pendingSummaryItemIds = [];
+        spokenResponseCreatePending = false;
         conversationItems.clear();
         deletedItemIds.clear();
         summaryItemIds.clear();
@@ -888,6 +1087,8 @@
         summaryOutputItemIds.clear();
         activeSpokenResponseIds.clear();
         activeOutputAudioResponseIds.clear();
+        recentAutoResponseItemIds.length = 0;
+        lastHumanVsAiCueAt = 0;
         if (aiAudioGateReleaseTimerId) {
           clearTimeout(aiAudioGateReleaseTimerId);
           aiAudioGateReleaseTimerId = null;
@@ -927,8 +1128,8 @@
             setConnectedControls(true);
             refreshMetrics();
             log('Data channel open');
-            log('Critai wake-cue auto-response enabled');
-            log('Semantic VAD high + far-field noise reduction enabled');
+            log('Critai transcript-gated wake-cue responses enabled');
+            log('Semantic VAD high + far-field noise reduction enabled; automatic VAD responses disabled');
             log('Rolling memory enabled after each completed response');
             log('Finale mode will trim old context and use faster turn detection after 24 minutes');
           });
@@ -971,6 +1172,9 @@
 
               if (payload.type === 'response.created' && payload.response?.id) {
                 activeResponseIds.add(payload.response.id);
+                if (payload.response?.metadata?.response_purpose !== 'rolling_summary') {
+                  spokenResponseCreatePending = false;
+                }
               }
 
               if (payload.type === 'response.created') {
@@ -993,6 +1197,7 @@
                 payload.item_id
               ) {
                 rememberInputTranscript(payload);
+                requestAutoResponseForTranscript(payload);
               }
 
               if (payload.type === 'conversation.item.deleted' && payload.item_id) {
@@ -1018,6 +1223,9 @@
                   activeResponseIds.delete(payload.response.id);
                 }
                 markSpokenResponseDone(payload.response);
+                if (purpose !== 'rolling_summary') {
+                  spokenResponseCreatePending = false;
+                }
 
                 const functionCalls = (payload.response?.output || []).filter((item) => item.type === 'function_call');
                 if (functionCalls.length) {
@@ -1132,6 +1340,11 @@
           return;
         }
 
+        if (spokenResponseCreatePending || activeSpokenResponseIds.size || activeOutputAudioResponseIds.size) {
+          log('ASK CRITAI ignored: another spoken response is still active');
+          return;
+        }
+
         const event = {
           type: 'response.create',
           response: {
@@ -1145,7 +1358,7 @@
           },
         };
 
-        sendRealtimeEvent(event, 'ASK CRITAI sent');
+        spokenResponseCreatePending = sendRealtimeEvent(event, 'ASK CRITAI sent');
       }
 
       function toggleMute() {

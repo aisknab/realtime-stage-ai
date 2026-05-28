@@ -307,7 +307,7 @@ const sessionConfig = {
       turn_detection: {
         type: 'semantic_vad',
         eagerness: 'high',
-        create_response: true,
+        create_response: false,
         interrupt_response: false,
       },
     },
