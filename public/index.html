@@ -615,7 +615,7 @@
                   'Update the rolling stage-memory summary for Critai.',
                   'Preserve only durable facts, decisions, audience-relevant context, callbacks, and unresolved cues.',
                   'Drop filler, repeated wording, and obsolete detail.',
-                  'Keep it under 180 words.',
+                  'Keep it under 140 words and finish with a complete sentence.',
                   rollingSummary ? `Previous rolling summary:\n${rollingSummary}` : 'Previous rolling summary: none yet.',
                 ].join('\n'),
               },
@@ -629,7 +629,7 @@
             response: {
               conversation: 'none',
               output_modalities: ['text'],
-              max_output_tokens: 260,
+              max_output_tokens: 520,
               metadata: {
                 response_purpose: 'rolling_summary',
                 reason,
@@ -925,6 +925,15 @@
                 log(`${responseLabel} finished: ${status}; reason: ${statusReason}; output tokens: ${outputTokens}`);
 
                 if (purpose === 'rolling_summary') {
+                  if (status !== 'completed') {
+                    log(`Rolling summary discarded: ${status}; reason: ${statusReason}; kept existing memory and context`);
+                    summaryInFlight = false;
+                    pendingSummaryResponseId = null;
+                    pendingSummaryText = '';
+                    pendingSummaryItemIds = [];
+                    return;
+                  }
+
                   applyRollingSummary(pendingSummaryText || extractResponseText(payload.response));
                   return;
                 }
