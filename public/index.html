@@ -396,31 +396,7 @@
         }
 
         const wakeName = '(?:crit\\s*a\\.?\\s*i\\.?|critai|crite\\s*ai|krit\\s*ai|crit\\s*ay\\s*eye)';
-        const criteoAiName = 'criteo\\s*ai';
-        const requestWords =
-          '(?:what|explain|jump|can|could|tell|give|how|why|when|where|do|does|should|would|introduce|check|please)';
-        const directCueSuffix = `(?=\\s*[,;:]|\\s+${requestWords}\\b|\\s*$)`;
-        const postNameRequest =
-          '(?:(?:so|now|okay|ok)\\s*,?\\s+)?(?:please\\s+)?(?:introduce\\s+yourself|say\\s+hello|jump\\s+in|take\\s+it(?:\\s+away)?|tell\\s+(?:them|us)\\s+who\\s+you\\s+are)';
-        const directAddressPatterns = [
-          new RegExp(`^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${wakeName}\\b${directCueSuffix}`, 'i'),
-          new RegExp(
-            `^(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+|so\\s+|now\\s+)?${criteoAiName}\\b${directCueSuffix}`,
-            'i'
-          ),
-          new RegExp(`[.!?]\\s*(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+)?${wakeName}\\b${directCueSuffix}`, 'i'),
-          new RegExp(`[.!?]\\s*(?:hey\\s+|hi\\s+|okay\\s+|ok\\s+|yo\\s+)?${criteoAiName}\\b${directCueSuffix}`, 'i'),
-          new RegExp(`[,;:]\\s*${wakeName}\\b`, 'i'),
-          new RegExp(`[,;:]\\s*${criteoAiName}\\b`, 'i'),
-          new RegExp(`\\b(?:hey|hi|yo)\\s+${wakeName}\\b`, 'i'),
-          new RegExp(`\\b(?:hey|hi|yo)\\s+${criteoAiName}\\b`, 'i'),
-          new RegExp(`\\b${wakeName}\\b\\s*[,;:]\\s*${postNameRequest}\\b`, 'i'),
-          new RegExp(`\\b${criteoAiName}\\b\\s*[,;:]\\s*${postNameRequest}\\b`, 'i'),
-          new RegExp(`\\b${wakeName}\\b\\s*[.!?]\\s*${postNameRequest}\\b`, 'i'),
-          new RegExp(`\\b${criteoAiName}\\b\\s*[.!?]\\s*${postNameRequest}\\b`, 'i'),
-        ];
-
-        return directAddressPatterns.some((pattern) => pattern.test(text));
+        return new RegExp(`\\b${wakeName}\\b`, 'i').test(text);
       }
 
       function hasHumanVsAiPrimaryCue(transcript) {
@@ -477,7 +453,7 @@
             type: 'wake_cue',
             label: 'Critai wake phrase',
             instruction:
-              'The latest transcript contains a direct Crit A.I. wake cue. Answer only that latest cue as Crit A.I., be concise and stage-ready, then stop. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai".',
+              'The latest transcript contains a Crit A.I. wake-name mention. Treat that mention as a cue, answer the latest question or command as Crit A.I., be concise and stage-ready, then stop. If you refer to yourself by name, write it exactly as "Crit A.I.", not "Critai".',
           };
         }
 

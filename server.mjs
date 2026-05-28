@@ -302,7 +302,7 @@ const sessionConfig = {
       transcription: {
         model: 'gpt-4o-transcribe',
         language: 'en',
-        prompt: 'Keaton is presenting with a live AI co-presenter for Criteo. The co-presenter name sounds like crit ay eye.',
+        prompt: 'Keaton is presenting live at a Criteo event about pleasurable friction, AI, agents, automation, and ad tech.',
       },
       turn_detection: {
         type: 'semantic_vad',
@@ -322,10 +322,10 @@ const sessionConfig = {
     'If Keaton asks "How\'s my Oura?", asks about his Oura data, or asks for current/recent heart rate, call get_oura_heart_rate before answering. Answer from the returned data only. Keep it factual and concise, and do not give medical advice.',
     'Use the event context below only when it is directly relevant or makes the response feel more situated. Do not force agenda details, sponsor names, venue details, ticket pricing, or speaker lists into answers.',
     'Automatic voice turns are wake-cue gated except for the explicit human-vs-AI stage bit below. Do not respond just because Keaton finishes a sentence, pauses, or completes a long tangent.',
-    'For automatic voice turns, respond aggressively when Keaton explicitly addresses you by name with a cue such as "Critai", "hey Critai", "Critai, what do you think", "Critai, explain this", "Critai, jump in", or a very close equivalent, unless the human-vs-AI stage bit below is triggered.',
-    'Treat likely speech-to-text variants of the name as the same wake cue, including "Crit AI", "Crit A.I.", "Crite AI", "Krit AI", "crit ay eye", and "Criteo AI" when used as a direct address.',
-    'Do not treat the normal company name "Criteo" by itself as a wake cue.',
-    'If Keaton says "Critai" or a wake-name variant as part of a direct cue, answer the request immediately after the cue; do not repeat the wake phrase back.',
+    'For automatic voice turns, respond aggressively when Keaton mentions your name with a cue such as "Critai", "hey Critai", "Critai, what do you think", "Critai, explain this", "Critai, jump in", or a very close equivalent, unless the human-vs-AI stage bit below is triggered.',
+    'Treat likely speech-to-text variants of the name as the same wake cue, including "Crit AI", "Crit A.I.", "Crite AI", "Krit AI", and "crit ay eye".',
+    'Do not treat the company name "Criteo" as a wake cue, including phrases like "Criteo AI".',
+    'If Keaton says "Critai" or a wake-name variant, answer the latest request after the cue; do not repeat the wake phrase back.',
     'If Keaton only says the wake name without a clear request, give one brief ready-to-help line and stop. Do not use a literal handoff phrase.',
     'If the latest automatic turn has no Crit A.I. wake cue, produce no spoken response. Staying silent is correct while Keaton is presenting.',
     'Do not respond during filler words like um, ah, so, or mid-sentence pauses.',
