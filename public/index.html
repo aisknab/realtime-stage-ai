@@ -241,6 +241,7 @@
       const ROLLING_MEMORY_KEEP_ITEMS = 4;
       const ROLLING_MEMORY_MIN_ITEMS = 5;
       const AI_AUDIO_GATE_RELEASE_DELAY_MS = 800;
+      const MAX_LOG_CHARS = 60000;
       const OURA_FUNCTION_NAME = 'get_oura_heart_rate';
       const FINAL_AUDIO_ONLY_INSTRUCTION =
         'Produce exactly one spoken assistant message in the final_answer phase only. Do not emit commentary audio or a spoken preamble.';
@@ -257,6 +258,7 @@
       let dataChannel;
       let localStream;
       let micMuted = false;
+      let sessionGeneration = 0;
       let aiAudioGateActive = false;
       let aiAudioGateReleaseTimerId;
       let sessionStartedAt = 0;
@@ -271,6 +273,7 @@
       const conversationItems = new Map();
       const deletedItemIds = new Set();
       const summaryItemIds = new Set();
+      const activeResponseIds = new Set();
       const activeSpokenResponseIds = new Set();
       const activeOutputAudioResponseIds = new Set();
 
@@ -306,7 +309,9 @@
       function log(message, details) {
         const time = new Date().toLocaleTimeString();
         const suffix = details ? ` ${JSON.stringify(details)}` : '';
-        logEl.textContent += `[${time}] ${message}${suffix}\n`;
+        const nextText = `${logEl.textContent}[${time}] ${message}${suffix}\n`;
+        logEl.textContent =
+          nextText.length > MAX_LOG_CHARS ? nextText.slice(nextText.length - MAX_LOG_CHARS) : nextText;
         logEl.scrollTop = logEl.scrollHeight;
       }
 
@@ -377,6 +382,44 @@
         dataChannel.send(JSON.stringify(event));
         log(label, event);
         return true;
+      }
+
+      function shouldLogRealtimePayload(payload) {
+        return typeof payload?.type !== 'string' || !payload.type.endsWith('.delta');
+      }
+
+      function cancelInFlightResponses() {
+        if (!dataChannel || dataChannel.readyState !== 'open') {
+          return;
+        }
+
+        const responseIds = new Set(activeResponseIds);
+        if (pendingSummaryResponseId) {
+          responseIds.add(pendingSummaryResponseId);
+        }
+
+        if (!responseIds.size) {
+          return;
+        }
+
+        for (const responseId of responseIds) {
+          sendRealtimeEvent(
+            {
+              type: 'response.cancel',
+              response_id: responseId,
+            },
+            `Cancel requested for response ${responseId}`
+          );
+        }
+
+        if (activeOutputAudioResponseIds.size) {
+          sendRealtimeEvent(
+            {
+              type: 'output_audio_buffer.clear',
+            },
+            'Output audio buffer clear requested'
+          );
+        }
       }
 
       function syncMicTrackState() {
@@ -777,6 +820,9 @@
       }
 
       function stopSession() {
+        cancelInFlightResponses();
+        sessionGeneration += 1;
+
         if (timerId) {
           clearInterval(timerId);
           timerId = null;
@@ -810,6 +856,7 @@
         conversationItems.clear();
         deletedItemIds.clear();
         summaryItemIds.clear();
+        activeResponseIds.clear();
         activeSpokenResponseIds.clear();
         activeOutputAudioResponseIds.clear();
         if (aiAudioGateReleaseTimerId) {
@@ -830,6 +877,8 @@
           setStatus('Connecting');
           connectBtn.disabled = true;
           log('Requesting microphone');
+          sessionGeneration += 1;
+          const sessionId = sessionGeneration;
 
           localStream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -856,12 +905,22 @@
           });
 
           dataChannel.addEventListener('message', (event) => {
+            if (sessionId !== sessionGeneration) {
+              return;
+            }
+
             try {
               const payload = JSON.parse(event.data);
-              log(`Realtime event: ${payload.type || 'message'}`, payload);
+              if (shouldLogRealtimePayload(payload)) {
+                log(`Realtime event: ${payload.type || 'message'}`, payload);
+              }
 
               if (payload.item) {
                 rememberConversationItem(payload.item);
+              }
+
+              if (payload.type === 'response.created' && payload.response?.id) {
+                activeResponseIds.add(payload.response.id);
               }
 
               if (
@@ -912,6 +971,9 @@
                 const status = payload.response?.status || 'unknown';
                 const statusReason = payload.response?.status_details?.reason || 'none';
                 const outputTokens = payload.response?.usage?.output_tokens || 0;
+                if (payload.response?.id) {
+                  activeResponseIds.delete(payload.response.id);
+                }
                 markSpokenResponseDone(payload.response);
 
                 const functionCalls = (payload.response?.output || []).filter((item) => item.type === 'function_call');
@@ -953,10 +1015,18 @@
           });
 
           dataChannel.addEventListener('close', () => {
+            if (sessionId !== sessionGeneration) {
+              return;
+            }
+
             log('Data channel closed');
           });
 
           peerConnection.addEventListener('connectionstatechange', () => {
+            if (sessionId !== sessionGeneration) {
+              return;
+            }
+
             log(`Peer connection: ${peerConnection.connectionState}`);
             if (['failed', 'closed', 'disconnected'].includes(peerConnection.connectionState)) {
               setStatus(peerConnection.connectionState);
@@ -964,6 +1034,10 @@
           });
 
           peerConnection.addEventListener('track', (event) => {
+            if (sessionId !== sessionGeneration) {
+              return;
+            }
+
             remoteAudio.srcObject = event.streams[0];
             log('Remote audio track received');
           });
