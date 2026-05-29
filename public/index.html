@@ -414,6 +414,20 @@
         return promptFragments.some((fragment) => plain.includes(fragment));
       }
 
+      function isLikelyAiSupercutTranscript(transcript) {
+        const words = normalizeTranscript(transcript)
+          .replace(/[^a-z0-9\s]/g, ' ')
+          .split(/\s+/)
+          .filter(Boolean);
+
+        if (words.length < 12) {
+          return false;
+        }
+
+        const aiCount = words.filter((word) => word === 'ai').length;
+        return aiCount / words.length >= 0.8;
+      }
+
       function hasWakeCue(transcript) {
         const text = normalizeTranscript(transcript);
         if (!text) {
@@ -647,6 +661,23 @@
         }
       }
 
+      function deleteUncuedTranscriptItem(itemId, label) {
+        if (!itemId || deletedItemIds.has(itemId)) {
+          return;
+        }
+
+        sendRealtimeEvent(
+          {
+            type: 'conversation.item.delete',
+            item_id: itemId,
+          },
+          label
+        );
+        conversationItems.delete(itemId);
+        deletedItemIds.add(itemId);
+        refreshMetrics();
+      }
+
       function requestAutoResponse(payload, trigger, transcript, extraMetadata = {}) {
         if (recentAutoResponseItemIds.includes(payload.item_id)) {
           return;
@@ -688,6 +719,16 @@
 
       function requestAutoResponseForTranscript(payload) {
         const transcript = payload.transcript || '';
+
+        if (isLikelyAiSupercutTranscript(transcript)) {
+          clearPendingWakeCue();
+          log('Auto-response skipped: repetitive AI supercut/video audio', {
+            item_id: payload.item_id,
+            transcript,
+          });
+          deleteUncuedTranscriptItem(payload.item_id, 'Deleted repetitive AI supercut transcript item');
+          return;
+        }
 
         if (isLikelyTranscriptionPromptLeak(transcript)) {
           log('Auto-response skipped: transcription prompt leak', {
