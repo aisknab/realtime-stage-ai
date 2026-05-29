@@ -476,10 +476,9 @@
           return false;
         }
 
+        const assistantVerb = '(?:tell|make|explain|introduce|jump|take|check|give|say|show|help|talk|comment)';
         const directRequestPatterns = [
-          /^(?:so\s+|okay\s+|ok\s+|right\s+|well\s+|yeah\s+|yep\s+|now\s+)*can\s+you\b/,
-          /^(?:so\s+|okay\s+|ok\s+|right\s+|well\s+|yeah\s+|yep\s+|now\s+)*could\s+you\b/,
-          /^(?:so\s+|okay\s+|ok\s+|right\s+|well\s+|yeah\s+|yep\s+|now\s+)*would\s+you\b/,
+          new RegExp(`^(?:so\\s+|okay\\s+|ok\\s+|right\\s+|well\\s+|yeah\\s+|yep\\s+|now\\s+)*(?:can|could|would)\\s+you\\s+(?:please\\s+)?${assistantVerb}\\b`),
           /^(?:so\s+|okay\s+|ok\s+|right\s+|well\s+|yeah\s+|yep\s+|now\s+)*please\s+(?:tell|make|explain|introduce|jump|take|check|give|say|show|help)\b/,
           /^(?:so\s+|okay\s+|ok\s+|right\s+|well\s+|yeah\s+|yep\s+|now\s+)*(?:tell|make|explain|introduce|jump|take|check|give|say|show|help)\b/,
           /^(?:so\s+|okay\s+|ok\s+|right\s+|well\s+|yeah\s+|yep\s+|now\s+)*what\s+do\s+you\s+think\b/,
