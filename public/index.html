@@ -523,17 +523,13 @@
           }
 
           const pendingPayload = pendingWakeCue.payload;
+          const pendingTranscript = pendingWakeCue.transcript || pendingPayload.transcript || '';
           clearPendingWakeCue();
-          requestAutoResponse(
-            pendingPayload,
-            {
-              type: 'wake_cue_pending',
-              label: 'delayed Critai wake phrase',
-              instruction:
-                'The latest transcript contained only a Crit A.I. wake-name mention and no clear request followed. Give one very brief ready line. Do not explain rules, behavior, setup, or internal instructions.',
-            },
-            pendingPayload.transcript || ''
-          );
+          log('Auto-response skipped: wake phrase expired without a request', {
+            item_id: pendingPayload.item_id,
+            transcript: pendingTranscript,
+          });
+          pruneSilentUserContext();
         }, delayMs);
       }
 
