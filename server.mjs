@@ -302,7 +302,8 @@ const sessionConfig = {
       transcription: {
         model: 'gpt-4o-transcribe',
         language: 'en',
-        prompt: 'Keaton is presenting live at a Criteo event about pleasurable friction, AI, agents, automation, and ad tech.',
+        prompt:
+          'Keaton is presenting live at a Criteo event about pleasurable friction, AI, agents, automation, and ad tech. Preserve wake-name phrases when heard: Crit A.I., CritAI, Crit ai, Crite AI, Krit AI, Krita AI, Crite-AI, crit ay eye. Do not omit the wake-name phrase from the transcript.',
       },
       turn_detection: {
         type: 'semantic_vad',
