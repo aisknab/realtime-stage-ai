@@ -260,12 +260,30 @@ async function fetchLatestOuraHeartRate({ lookbackHours = 24 } = {}) {
   }
 
   const sampleTime = new Date(latestSample.timestamp);
+  const bpm = Number(latestSample.bpm);
+  const sampleAgeMinutes = Math.max(0, Math.round((end.getTime() - sampleTime.getTime()) / 60000));
+  let stageStatusMessage;
+  let stageStatusReason;
+
+  if (sampleAgeMinutes > 60) {
+    stageStatusMessage = "although you seem a bit stressed right now, whatever is causing it, i'm sure it'll pass";
+    stageStatusReason = 'sample_older_than_60_minutes';
+  } else if (bpm > 80) {
+    stageStatusMessage = "you seem a bit stressed right now, whatever is causing it, i'm sure it'll pass";
+    stageStatusReason = 'recent_bpm_above_80';
+  } else {
+    stageStatusMessage = "you are pretty relaxed for the talk, calm and focused, a sign you know what you're talking about";
+    stageStatusReason = bpm === 80 ? 'recent_bpm_at_80' : 'recent_bpm_under_80';
+  }
+
   return {
     available: true,
-    bpm: Number(latestSample.bpm),
+    bpm,
     timestamp: latestSample.timestamp,
     source: latestSample.source,
-    sample_age_minutes: Math.max(0, Math.round((end.getTime() - sampleTime.getTime()) / 60000)),
+    sample_age_minutes: sampleAgeMinutes,
+    stage_status_message: stageStatusMessage,
+    stage_status_reason: stageStatusReason,
     lookback_hours: lookbackHours,
     checked_at: end.toISOString(),
   };
@@ -323,7 +341,7 @@ const sessionConfig = {
     'Personality: witty and dry, with deadpan humor in roughly half of suitable responses. Keep it sharp and stage-appropriate; do not force jokes into serious or unclear moments.',
     singleSpokenPhaseInstructions,
     'If Keaton asks you to introduce yourself, address the room directly: "Good afternoon, IAB AdTech & Ops Summit. I\'m Crit A.I., Keaton\'s live AI co-presenter. I\'m here to help put on a great presentation about pleasurable friction." Do not add setup commentary or explain how you work.',
-    'If Keaton asks "How\'s my Oura?", asks about his Oura data, or asks for current/recent heart rate, call get_oura_heart_rate before answering. Answer from the returned data only. Keep it factual and concise, and do not give medical advice.',
+    'If Keaton asks "How\'s my Oura?", asks about his Oura data, or asks for current/recent heart rate, call get_oura_heart_rate before answering. Answer from the returned data only. Keep it factual and concise, and do not give medical advice. If the Oura result includes stage_status_message, say it verbatim after the BPM and sample age.',
     'Use the event context below only when it is directly relevant or makes the response feel more situated. Do not force agenda details, sponsor names, venue details, ticket pricing, or speaker lists into answers.',
     'Automatic voice turns are wake-cue gated except for the explicit human-vs-AI stage bit below. Do not respond just because Keaton finishes a sentence, pauses, or completes a long tangent.',
     'For automatic voice turns, respond aggressively when Keaton mentions your name with a cue such as "Critai", "hey Critai", "Critai, what do you think", "Critai, explain this", "Critai, jump in", or a very close equivalent, unless the human-vs-AI stage bit below is triggered.',

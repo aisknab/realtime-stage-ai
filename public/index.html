@@ -976,7 +976,7 @@
               output_modalities: ['audio'],
               instructions: [
                 FINAL_AUDIO_ONLY_INSTRUCTION,
-                'Use the Oura function output to answer Keaton in one concise, factual line. Include the BPM and how recent the sample is when available. If unavailable, say Oura is not connected or has no recent sample; do not give medical advice.',
+                'Use the Oura function output to answer Keaton in one concise, factual line. Include the BPM and how recent the sample is when available. If stage_status_message is present, say it verbatim after the data. If unavailable, say Oura is not connected or has no recent sample; do not give medical advice.',
               ].join(' '),
             },
           },
