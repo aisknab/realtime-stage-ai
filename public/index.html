@@ -409,6 +409,7 @@
           'the co presenter name sounds like crit ay eye',
           'preserve wake name phrases when heard',
           'direct address may be misheard as pert ai',
+          'brit ay eye',
           'the health wearable is oura ring',
           'do not omit the wake name phrase from the transcript',
         ];
@@ -442,6 +443,8 @@
           'critai',
           `cr${nameBreak}a${nameBreak}i`,
           `c${nameBreak}r${nameBreak}a${nameBreak}i`,
+          `brit${nameBreak}a${nameBreak}i`,
+          `brit${nameBreak}ay${nameBreak}eye`,
           `crite${nameBreak}ai`,
           `crita${nameBreak}ai`,
           `critta${nameBreak}ai`,
@@ -486,7 +489,7 @@
         }
 
         const nameBreak = '[\\s.\\-_/]*';
-        const looseStem = '(?:pert|purt|bert|burt|curt|kurt|kert|grit|grid|cricket|credit)';
+        const looseStem = '(?:pert|purt|bert|burt|brat|curt|kurt|kert|grit|grid|cricket|credit)';
         const looseWakeName = `${looseStem}${nameBreak}(?:a${nameBreak}i|ai|eye)`;
         return new RegExp(`\\b${looseWakeName}\\b${requestAfterNamePattern()}`, 'i').test(text);
       }
