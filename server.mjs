@@ -321,7 +321,7 @@ const sessionConfig = {
         model: 'gpt-4o-transcribe',
         language: 'en',
         prompt:
-          'Keaton is presenting live at a Criteo event about pleasurable friction, AI, agents, automation, and ad tech. Preserve wake-name phrases when heard: Crit A.I., CritAI, Crit ai, Crite AI, Critic AI, Krit AI, Krita AI, Crite-AI, crit ay eye. The health wearable is Oura Ring; in health or heart-rate questions, transcribe it as Oura rather than Aura. Do not omit the wake-name phrase from the transcript.',
+          'Keaton is presenting live at a Criteo event about pleasurable friction, AI, agents, automation, and ad tech. Preserve wake-name phrases when heard: Crit A.I., CritAI, Crit ai, Crite AI, Critic AI, Krit AI, Krita AI, Crite-AI, crit ay eye. Direct address may be misheard as Pert AI, Bert AI, Curt AI, or Grit AI; transcribe it as Crit A.I. when it is used to address the co-presenter. The health wearable is Oura Ring; in health or heart-rate questions, transcribe it as Oura rather than Aura. Do not omit the wake-name phrase from the transcript.',
       },
       turn_detection: {
         type: 'semantic_vad',

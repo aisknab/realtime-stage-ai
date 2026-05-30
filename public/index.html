@@ -408,6 +408,7 @@
           'keaton is presenting with a live ai co presenter for criteo',
           'the co presenter name sounds like crit ay eye',
           'preserve wake name phrases when heard',
+          'direct address may be misheard as pert ai',
           'the health wearable is oura ring',
           'do not omit the wake name phrase from the transcript',
         ];
@@ -456,7 +457,15 @@
           `cray${nameBreak}(?:a${nameBreak}i|ai|eye)`,
         ];
         const wakeName = `(?:${wakeNameVariants.join('|')})`;
-        return new RegExp(`\\b${wakeName}\\b`, 'i').test(text) || hasCriteoMisheardWakeCue(text);
+        return (
+          new RegExp(`\\b${wakeName}\\b`, 'i').test(text) ||
+          hasCriteoMisheardWakeCue(text) ||
+          hasLooseMisheardWakeCue(text)
+        );
+      }
+
+      function requestAfterNamePattern() {
+        return '(?:[,;:?!.-]?\\s*(?:(?:can|could|would|will|should|do)\\s+you\\b|(?:is|does)\\s+(?:this|that|it)\\b|are\\s+(?:we|you|there)\\b|please\\b|(?:tell|make|explain|jump|take|check|give|say|show|help|introduce)\\b|(?:what|how|why|when|where|who)\\b))';
       }
 
       function hasCriteoMisheardWakeCue(transcript) {
@@ -467,9 +476,19 @@
 
         const nameBreak = '[\\s.\\-_/]*';
         const criteoName = `criteo(?:${nameBreak}(?:a${nameBreak}i|ai))?`;
-        const requestAfterName =
-          '(?:[,;:?!.-]?\\s*(?:(?:can|could|would|will|should|do)\\s+you\\b|(?:is|does)\\s+(?:this|that|it)\\b|are\\s+(?:we|you|there)\\b|please\\b|(?:tell|make|explain|jump|take|check|give|say|show|help|introduce)\\b|(?:what|how|why|when|where|who)\\b))';
-        return new RegExp(`\\b${criteoName}\\b${requestAfterName}`, 'i').test(text);
+        return new RegExp(`\\b${criteoName}\\b${requestAfterNamePattern()}`, 'i').test(text);
+      }
+
+      function hasLooseMisheardWakeCue(transcript) {
+        const text = normalizeTranscript(transcript);
+        if (!text) {
+          return false;
+        }
+
+        const nameBreak = '[\\s.\\-_/]*';
+        const looseStem = '(?:pert|purt|bert|burt|curt|kurt|kert|grit|grid|cricket|credit)';
+        const looseWakeName = `${looseStem}${nameBreak}(?:a${nameBreak}i|ai|eye)`;
+        return new RegExp(`\\b${looseWakeName}\\b${requestAfterNamePattern()}`, 'i').test(text);
       }
 
       function hasLikelyFollowUpRequest(transcript) {
