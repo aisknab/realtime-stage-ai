@@ -267,7 +267,18 @@
       let peerConnection;
       let dataChannel;
       let localStream;
+      let outboundStream;
+      let outboundAudioContext = null;
+      let outboundMicSource = null;
+      let outboundMicGain = null;
       let micMuted = false;
+      let videoShieldActive = false;
+      let videoShieldStartedAt = 0;
+      let videoShieldReleaseTimerId = null;
+      let videoShieldAudioSeen = false;
+      let videoShieldQuietStartedAt = 0;
+      let stageInputArmed = false;
+      let introVideoDetectedAt = 0;
       let sessionGeneration = 0;
       let aiAudioGateActive = false;
       let aiAudioGateReleaseTimerId;
@@ -291,6 +302,7 @@
       const activeOutputAudioResponseIds = new Set();
       const recentAutoResponseItemIds = [];
       const activeUserSpeechItemIds = new Set();
+      const videoShieldedItemIds = new Set();
       const inputSpeechMeta = new Map();
       let lastHumanVsAiCueAt = 0;
       let pendingWakeCue = null;
@@ -350,8 +362,9 @@
         const elapsedMs = sessionStartedAt ? Date.now() - sessionStartedAt : 0;
         elapsedText.textContent = formatElapsed(elapsedMs);
         contextText.textContent = `${conversationItems.size} items`;
-        modeText.textContent = finaleMode ? 'Finale' : sessionStartedAt ? 'Live' : 'Standby';
+        modeText.textContent = videoShieldActive ? 'Video Recovery' : finaleMode ? 'Finale' : sessionStartedAt ? stageInputArmed ? 'Live' : 'Pre-Turn' : 'Standby';
         updateMicText();
+        askBtn.disabled = !sessionStartedAt || !stageInputArmed;
         finaleBtn.disabled = !sessionStartedAt || finaleMode;
 
         if (
@@ -376,7 +389,7 @@
           return;
         }
 
-        const label = micMuted ? 'Muted' : aiAudioGateActive ? 'Gated' : track.enabled ? 'Live' : 'Off';
+        const label = micMuted ? 'Muted' : videoShieldActive ? 'Shielded' : aiAudioGateActive ? 'Gated' : track.enabled ? 'Live' : 'Off';
         micText.textContent = `${label} ${Math.round(micLevelPercent)}%`;
       }
 
@@ -399,6 +412,62 @@
         micAnalyser = null;
         micLevelPercent = 0;
         updateMicText();
+      }
+
+      function stopOutboundAudio() {
+        if (outboundMicSource) {
+          outboundMicSource.disconnect();
+          outboundMicSource = null;
+        }
+
+        if (outboundMicGain) {
+          outboundMicGain.disconnect();
+          outboundMicGain = null;
+        }
+
+        if (outboundStream && outboundStream !== localStream) {
+          outboundStream.getTracks().forEach((track) => track.stop());
+        }
+        outboundStream = null;
+
+        if (outboundAudioContext) {
+          outboundAudioContext.close().catch(() => {});
+          outboundAudioContext = null;
+        }
+      }
+
+      function setupOutboundAudio(stream) {
+        stopOutboundAudio();
+
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) {
+          outboundStream = stream;
+          log('Automatic intro shield fallback: Web Audio API is not supported');
+          return outboundStream;
+        }
+
+        try {
+          stream.getAudioTracks().forEach((track) => {
+            track.enabled = true;
+          });
+          outboundAudioContext = new AudioContextClass();
+          outboundAudioContext.resume?.().catch(() => {});
+          outboundMicSource = outboundAudioContext.createMediaStreamSource(stream);
+          outboundMicGain = outboundAudioContext.createGain();
+          outboundMicGain.gain.value = 1;
+          const destination = outboundAudioContext.createMediaStreamDestination();
+          outboundMicSource.connect(outboundMicGain);
+          outboundMicGain.connect(destination);
+          outboundStream = destination.stream;
+          return outboundStream;
+        } catch (error) {
+          stopOutboundAudio();
+          outboundStream = stream;
+          log('Automatic intro shield fallback: outbound audio graph unavailable', {
+            error: error instanceof Error ? error.message : 'Unknown Web Audio error',
+          });
+          return outboundStream;
+        }
       }
 
       function startMicMonitor(stream) {
@@ -508,10 +577,19 @@
           return;
         }
 
+        const existing = inputSpeechMeta.get(payload.item_id) || {};
+        const videoShielded = videoShieldActive || Boolean(existing.videoShielded);
+        if (videoShielded) {
+          videoShieldAudioSeen = true;
+          videoShieldQuietStartedAt = 0;
+          videoShieldedItemIds.add(payload.item_id);
+        }
+
         inputSpeechMeta.set(payload.item_id, {
-          ...(inputSpeechMeta.get(payload.item_id) || {}),
+          ...existing,
           startedAt: Date.now(),
           audioStartMs: Number(payload.audio_start_ms),
+          videoShielded,
         });
       }
 
@@ -530,8 +608,14 @@
               ? Math.max(0, Date.now() - existing.startedAt)
               : null;
 
+        const videoShielded = videoShieldActive || Boolean(existing.videoShielded);
+        if (videoShielded) {
+          videoShieldedItemIds.add(payload.item_id);
+        }
+
         inputSpeechMeta.set(payload.item_id, {
           ...existing,
+          videoShielded,
           audioEndMs,
           durationMs,
           stoppedAt: Date.now(),
@@ -898,6 +982,7 @@
           conversationItems.delete(item.id);
           deletedItemIds.add(item.id);
           inputSpeechMeta.delete(item.id);
+          videoShieldedItemIds.delete(item.id);
         }
 
         if (itemsToDelete.length) {
@@ -921,6 +1006,7 @@
         conversationItems.delete(itemId);
         deletedItemIds.add(itemId);
         inputSpeechMeta.delete(itemId);
+        videoShieldedItemIds.delete(itemId);
         refreshMetrics();
       }
 
@@ -965,6 +1051,18 @@
 
       function requestAutoResponseForTranscript(payload) {
         const transcript = payload.transcript || '';
+        const speechMeta = inputSpeechMeta.get(payload.item_id);
+
+        if (videoShieldedItemIds.has(payload.item_id) || speechMeta?.videoShielded) {
+          clearPendingWakeCue();
+          log('Transcript ignored: captured while video shield was active', {
+            item_id: payload.item_id,
+            transcript,
+          });
+          clearRealtimeInputBuffer('Input audio buffer cleared after shielded transcript');
+          deleteUncuedTranscriptItem(payload.item_id, 'Deleted video-shielded transcript item');
+          return;
+        }
 
         if (isLikelyAiSupercutTranscript(transcript)) {
           clearPendingWakeCue();
@@ -972,7 +1070,17 @@
             item_id: payload.item_id,
             transcript,
           });
+
+          armStageInputFromIntroVideo(payload.item_id);
           deleteUncuedTranscriptItem(payload.item_id, 'Deleted repetitive AI supercut transcript item');
+          return;
+        }
+
+        if (!stageInputArmed) {
+          log('Pre-turn transcript held until AI-supercut intro marker', {
+            item_id: payload.item_id,
+            transcript,
+          });
           return;
         }
 
@@ -1043,6 +1151,15 @@
         return true;
       }
 
+      function clearRealtimeInputBuffer(label) {
+        return sendRealtimeEvent(
+          {
+            type: 'input_audio_buffer.clear',
+          },
+          label
+        );
+      }
+
       function shouldLogRealtimePayload(payload) {
         return typeof payload?.type !== 'string' || !payload.type.endsWith('.delta');
       }
@@ -1063,6 +1180,7 @@
             conversationItems.delete(itemId);
             deletedItemIds.add(itemId);
             inputSpeechMeta.delete(itemId);
+            videoShieldedItemIds.delete(itemId);
             refreshMetrics();
           }
           log(`Delete skipped: ${itemId || 'item'} is already absent on server`);
@@ -1110,15 +1228,172 @@
         }
       }
 
+      function markActiveSpeechItemsVideoShielded() {
+        for (const itemId of activeUserSpeechItemIds) {
+          const existing = inputSpeechMeta.get(itemId) || {};
+          inputSpeechMeta.set(itemId, {
+            ...existing,
+            videoShielded: true,
+          });
+          videoShieldedItemIds.add(itemId);
+        }
+      }
+
+      function handleInputAudioBufferCleared() {
+        if (!videoShieldActive || !activeUserSpeechItemIds.size) {
+          return;
+        }
+
+        markActiveSpeechItemsVideoShielded();
+        activeUserSpeechItemIds.clear();
+        log('Cleared active video-shield speech marker after input buffer clear');
+      }
+
+      function clearVideoShieldReleaseTimer() {
+        if (videoShieldReleaseTimerId) {
+          clearInterval(videoShieldReleaseTimerId);
+          videoShieldReleaseTimerId = null;
+        }
+      }
+
+      function deletePreTurnContext(currentItemId) {
+        const markerItem = conversationItems.get(currentItemId);
+        const markerCreatedAt = markerItem?.createdAt || Date.now();
+        const itemsToDelete = [...conversationItems.values()]
+          .filter(
+            (item) =>
+              item.id !== currentItemId &&
+              item.status === 'completed' &&
+              item.role === 'user' &&
+              item.createdAt <= markerCreatedAt &&
+              !deletedItemIds.has(item.id)
+          )
+          .sort((a, b) => a.createdAt - b.createdAt);
+
+        for (const item of itemsToDelete) {
+          sendRealtimeEvent(
+            {
+              type: 'conversation.item.delete',
+              item_id: item.id,
+            },
+            'Deleted pre-turn context item'
+          );
+          conversationItems.delete(item.id);
+          deletedItemIds.add(item.id);
+          inputSpeechMeta.delete(item.id);
+          videoShieldedItemIds.delete(item.id);
+        }
+
+        if (itemsToDelete.length) {
+          log(`Deleted ${itemsToDelete.length} pre-turn context items`);
+          refreshMetrics();
+        }
+      }
+
+      function transcriptForItem(item) {
+        return Object.values(item?.transcripts || {})
+          .join(' ')
+          .trim();
+      }
+
+      function replayPostIntroCue(currentItemId) {
+        const markerItem = conversationItems.get(currentItemId);
+        const markerCreatedAt = markerItem?.createdAt || 0;
+        const candidates = [...conversationItems.values()]
+          .filter(
+            (item) =>
+              item.id !== currentItemId &&
+              item.status === 'completed' &&
+              item.role === 'user' &&
+              item.createdAt > markerCreatedAt &&
+              !deletedItemIds.has(item.id) &&
+              transcriptForItem(item)
+          )
+          .sort((a, b) => a.createdAt - b.createdAt);
+
+        for (const item of candidates) {
+          const transcript = transcriptForItem(item);
+          if (detectAutoResponseTrigger(transcript) || (pendingWakeCue && hasLikelyFollowUpRequest(transcript))) {
+            log('Replaying post-intro cue that arrived before the video marker transcript', {
+              item_id: item.id,
+              transcript,
+            });
+            requestAutoResponseForTranscript({
+              item_id: item.id,
+              transcript,
+            });
+            return;
+          }
+        }
+      }
+
+      function armStageInputFromIntroVideo(currentItemId) {
+        stageInputArmed = true;
+        introVideoDetectedAt = Date.now();
+        setVideoShield(false, 'AI-supercut intro marker detected');
+        if (!activeUserSpeechItemIds.size) {
+          clearRealtimeInputBuffer('Input audio buffer cleared after AI-supercut intro marker');
+        } else {
+          log('Input buffer not cleared after AI-supercut marker because Keaton may already be speaking', {
+            active_speech_items: activeUserSpeechItemIds.size,
+          });
+        }
+        deletePreTurnContext(currentItemId);
+        refreshMetrics();
+        log('AI-supercut intro marker detected; Crit A.I. is armed for Keaton');
+        replayPostIntroCue(currentItemId);
+      }
+
+      function setVideoShield(active, reason = 'video recovery') {
+        if (!localStream || videoShieldActive === active) {
+          return;
+        }
+
+        const shieldSeconds = !active && videoShieldStartedAt
+          ? Math.round((Date.now() - videoShieldStartedAt) / 1000)
+          : 0;
+
+        videoShieldActive = active;
+        videoShieldStartedAt = active ? Date.now() : 0;
+        videoShieldAudioSeen = false;
+        videoShieldQuietStartedAt = 0;
+        clearVideoShieldReleaseTimer();
+
+        if (active) {
+          markActiveSpeechItemsVideoShielded();
+        }
+
+        syncMicTrackState();
+        refreshMetrics();
+
+        if (dataChannel?.readyState === 'open') {
+          clearRealtimeInputBuffer(active
+            ? 'Input audio buffer cleared for video recovery'
+            : 'Input audio buffer cleared after video recovery');
+        }
+
+        if (active) {
+          log(`Video recovery shield active${reason ? `: ${reason}` : ''}.`);
+          return;
+        }
+
+        const durationSuffix = shieldSeconds ? ` after ${shieldSeconds}s` : '';
+        log(`Video recovery shield released${durationSuffix}${reason ? `: ${reason}` : ''}. Mic audio is sent to AI.`);
+      }
       function syncMicTrackState() {
         if (!localStream) {
           return;
         }
 
-        const shouldEnableMic = !micMuted && !aiAudioGateActive;
-        localStream.getAudioTracks().forEach((track) => {
-          track.enabled = shouldEnableMic;
-        });
+        const shouldSendMic = !micMuted && !videoShieldActive && !aiAudioGateActive;
+        if (outboundMicGain && outboundAudioContext) {
+          const targetGain = shouldSendMic ? 1 : 0;
+          outboundMicGain.gain.setTargetAtTime(targetGain, outboundAudioContext.currentTime, 0.015);
+        } else {
+          localStream.getAudioTracks().forEach((track) => {
+            track.enabled = shouldSendMic;
+          });
+        }
         updateMicText();
       }
 
@@ -1296,6 +1571,7 @@
           conversationItems.delete(item.id);
           deletedItemIds.add(item.id);
           inputSpeechMeta.delete(item.id);
+          videoShieldedItemIds.delete(item.id);
         }
 
         if (itemsToDelete.length) {
@@ -1409,6 +1685,7 @@
           conversationItems.delete(itemId);
           deletedItemIds.add(itemId);
           inputSpeechMeta.delete(itemId);
+          videoShieldedItemIds.delete(itemId);
         }
         summaryItemIds.clear();
 
@@ -1449,6 +1726,7 @@
           conversationItems.delete(itemId);
           deletedItemIds.add(itemId);
           inputSpeechMeta.delete(itemId);
+          videoShieldedItemIds.delete(itemId);
         }
 
         log(`Rolling memory updated; deleted ${idsToDelete.length} older items`);
@@ -1506,7 +1784,7 @@
 
       function setConnectedControls(connected) {
         connectBtn.disabled = connected;
-        askBtn.disabled = !connected;
+        askBtn.disabled = !connected || !stageInputArmed;
         muteBtn.disabled = !connected;
         finaleBtn.disabled = !connected || finaleMode;
         killBtn.disabled = !connected;
@@ -1531,6 +1809,9 @@
           peerConnection = null;
         }
 
+        clearVideoShieldReleaseTimer();
+        stopOutboundAudio();
+
         if (localStream) {
           localStream.getTracks().forEach((track) => track.stop());
           localStream = null;
@@ -1539,6 +1820,12 @@
 
         remoteAudio.srcObject = null;
         micMuted = false;
+        videoShieldActive = false;
+        videoShieldStartedAt = 0;
+        videoShieldAudioSeen = false;
+        videoShieldQuietStartedAt = 0;
+        stageInputArmed = false;
+        introVideoDetectedAt = 0;
         sessionStartedAt = 0;
         finaleMode = false;
         lastPruneAt = 0;
@@ -1559,6 +1846,7 @@
         recentAutoResponseItemIds.length = 0;
         activeUserSpeechItemIds.clear();
         inputSpeechMeta.clear();
+        videoShieldedItemIds.clear();
         lastHumanVsAiCueAt = 0;
         clearPendingWakeCue();
         if (aiAudioGateReleaseTimerId) {
@@ -1591,6 +1879,7 @@
           });
           attachLocalTrackDiagnostics(localStream);
           startMicMonitor(localStream);
+          setupOutboundAudio(localStream);
 
           peerConnection = new RTCPeerConnection();
           dataChannel = peerConnection.createDataChannel('oai-events');
@@ -1605,6 +1894,7 @@
             log('Critai transcript-gated wake-cue responses enabled');
             log('Semantic VAD high + far-field noise reduction enabled; automatic VAD responses disabled');
             log('Rolling memory enabled after each completed response');
+            log('Pre-turn transcript gate enabled until the AI-supercut intro marker');
             log('Finale mode will trim old context and use faster turn detection after 24 minutes');
           });
 
@@ -1665,6 +1955,10 @@
                 rememberInputSpeechStopped(payload);
               }
 
+              if (payload.type === 'input_audio_buffer.cleared') {
+                handleInputAudioBufferCleared();
+              }
+
               if (payload.type === 'output_audio_buffer.started') {
                 markOutputAudioStarted(payload.response_id);
               }
@@ -1689,6 +1983,7 @@
                 conversationItems.delete(payload.item_id);
                 deletedItemIds.add(payload.item_id);
                 inputSpeechMeta.delete(payload.item_id);
+                videoShieldedItemIds.delete(payload.item_id);
                 refreshMetrics();
               }
 
@@ -1779,8 +2074,9 @@
             log('Remote audio track received');
           });
 
-          localStream.getAudioTracks().forEach((track) => {
-            peerConnection.addTrack(track, localStream);
+          const streamForPeer = outboundStream || localStream;
+          streamForPeer.getAudioTracks().forEach((track) => {
+            peerConnection.addTrack(track, streamForPeer);
           });
 
           const offer = await peerConnection.createOffer();
@@ -1823,6 +2119,11 @@
       function askAi() {
         if (!dataChannel || dataChannel.readyState !== 'open') {
           log('ASK CRITAI ignored: data channel is not open');
+          return;
+        }
+
+        if (!stageInputArmed) {
+          log('ASK CRITAI ignored: waiting for AI-supercut intro marker');
           return;
         }
 
