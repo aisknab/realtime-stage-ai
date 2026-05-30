@@ -102,7 +102,7 @@
 
       .metrics {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 14px;
         margin-bottom: 24px;
       }
@@ -211,6 +211,10 @@
           <span>Mode</span>
           <strong id="modeText">Standby</strong>
         </div>
+        <div class="metric">
+          <span>Mic</span>
+          <strong id="micText">Idle</strong>
+        </div>
       </section>
 
       <section class="panel" aria-label="Realtime event log">
@@ -232,6 +236,7 @@
       const elapsedText = document.getElementById('elapsedText');
       const contextText = document.getElementById('contextText');
       const modeText = document.getElementById('modeText');
+      const micText = document.getElementById('micText');
       const logEl = document.getElementById('log');
       const remoteAudio = document.getElementById('remoteAudio');
 
@@ -257,6 +262,7 @@
       const RECENT_AUTO_RESPONSE_ITEM_IDS = 6;
       const HUMAN_VS_AI_FOLLOW_UP_WINDOW_MS = 90 * 1000;
       const PENDING_WAKE_FOLLOW_UP_MS = 4500;
+      const OPENING_INTRO_WINDOW_MS = 4 * 60 * 1000;
 
       let peerConnection;
       let dataChannel;
@@ -285,9 +291,15 @@
       const activeOutputAudioResponseIds = new Set();
       const recentAutoResponseItemIds = [];
       const activeUserSpeechItemIds = new Set();
+      const inputSpeechMeta = new Map();
       let lastHumanVsAiCueAt = 0;
       let pendingWakeCue = null;
       let pendingWakeCueTimerId = null;
+      let micAudioContext = null;
+      let micAnalyser = null;
+      let micSource = null;
+      let micLevelAnimationId = null;
+      let micLevelPercent = 0;
 
       function setStatus(message) {
         statusText.textContent = message;
@@ -339,6 +351,7 @@
         elapsedText.textContent = formatElapsed(elapsedMs);
         contextText.textContent = `${conversationItems.size} items`;
         modeText.textContent = finaleMode ? 'Finale' : sessionStartedAt ? 'Live' : 'Standby';
+        updateMicText();
         finaleBtn.disabled = !sessionStartedAt || finaleMode;
 
         if (
@@ -349,6 +362,111 @@
         ) {
           enterFinaleMode('timer');
         }
+      }
+
+      function updateMicText() {
+        if (!localStream) {
+          micText.textContent = 'Idle';
+          return;
+        }
+
+        const track = localStream.getAudioTracks()[0];
+        if (!track || track.readyState === 'ended') {
+          micText.textContent = 'Ended';
+          return;
+        }
+
+        const label = micMuted ? 'Muted' : aiAudioGateActive ? 'Gated' : track.enabled ? 'Live' : 'Off';
+        micText.textContent = `${label} ${Math.round(micLevelPercent)}%`;
+      }
+
+      function stopMicMonitor() {
+        if (micLevelAnimationId) {
+          cancelAnimationFrame(micLevelAnimationId);
+          micLevelAnimationId = null;
+        }
+
+        if (micSource) {
+          micSource.disconnect();
+          micSource = null;
+        }
+
+        if (micAudioContext) {
+          micAudioContext.close().catch(() => {});
+          micAudioContext = null;
+        }
+
+        micAnalyser = null;
+        micLevelPercent = 0;
+        updateMicText();
+      }
+
+      function startMicMonitor(stream) {
+        stopMicMonitor();
+
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) {
+          log('Mic monitor unavailable: Web Audio API is not supported');
+          return;
+        }
+
+        try {
+          micAudioContext = new AudioContextClass();
+          micAnalyser = micAudioContext.createAnalyser();
+          micAnalyser.fftSize = 1024;
+          micSource = micAudioContext.createMediaStreamSource(stream);
+          micSource.connect(micAnalyser);
+
+          const samples = new Uint8Array(micAnalyser.fftSize);
+          const tick = () => {
+            if (!micAnalyser) {
+              return;
+            }
+
+            micAnalyser.getByteTimeDomainData(samples);
+            let sumSquares = 0;
+            for (const sample of samples) {
+              const centered = (sample - 128) / 128;
+              sumSquares += centered * centered;
+            }
+
+            const rms = Math.sqrt(sumSquares / samples.length);
+            micLevelPercent = Math.max(0, Math.min(100, Math.round(rms * 240)));
+            updateMicText();
+            micLevelAnimationId = requestAnimationFrame(tick);
+          };
+
+          tick();
+        } catch (error) {
+          log('Mic monitor unavailable', {
+            error: error instanceof Error ? error.message : 'Unknown Web Audio error',
+          });
+        }
+      }
+
+      function attachLocalTrackDiagnostics(stream) {
+        stream.getAudioTracks().forEach((track) => {
+          log('Local mic track ready', {
+            label: track.label || '(no label)',
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+            settings: track.getSettings?.() || {},
+          });
+
+          track.addEventListener('mute', () => {
+            log('Local mic track muted by browser/device');
+            updateMicText();
+          });
+          track.addEventListener('unmute', () => {
+            log('Local mic track unmuted by browser/device');
+            updateMicText();
+          });
+          track.addEventListener('ended', () => {
+            log('Local mic track ended');
+            updateMicText();
+          });
+        });
       }
 
       function rememberConversationItem(item) {
@@ -383,6 +501,59 @@
           transcripts,
           updatedAt: Date.now(),
         });
+      }
+
+      function rememberInputSpeechStarted(payload) {
+        if (!payload.item_id) {
+          return;
+        }
+
+        inputSpeechMeta.set(payload.item_id, {
+          ...(inputSpeechMeta.get(payload.item_id) || {}),
+          startedAt: Date.now(),
+          audioStartMs: Number(payload.audio_start_ms),
+        });
+      }
+
+      function rememberInputSpeechStopped(payload) {
+        if (!payload.item_id) {
+          return;
+        }
+
+        const existing = inputSpeechMeta.get(payload.item_id) || {};
+        const audioStartMs = Number.isFinite(existing.audioStartMs) ? existing.audioStartMs : Number(payload.audio_start_ms);
+        const audioEndMs = Number(payload.audio_end_ms);
+        const durationMs =
+          Number.isFinite(audioStartMs) && Number.isFinite(audioEndMs)
+            ? Math.max(0, audioEndMs - audioStartMs)
+            : existing.startedAt
+              ? Math.max(0, Date.now() - existing.startedAt)
+              : null;
+
+        inputSpeechMeta.set(payload.item_id, {
+          ...existing,
+          audioEndMs,
+          durationMs,
+          stoppedAt: Date.now(),
+        });
+      }
+
+      function logSparseTranscriptIfNeeded(payload) {
+        const meta = inputSpeechMeta.get(payload.item_id);
+        const durationMs = Number(meta?.durationMs);
+        const words = normalizeTranscript(payload.transcript)
+          .replace(/[^a-z0-9\s']/g, ' ')
+          .split(/\s+/)
+          .filter(Boolean);
+
+        if (Number.isFinite(durationMs) && durationMs >= 7000 && words.length <= 8) {
+          log('Possible missed speech: long input produced a short transcript', {
+            item_id: payload.item_id,
+            duration_seconds: Math.round(durationMs / 1000),
+            word_count: words.length,
+            transcript: payload.transcript || '',
+          });
+        }
       }
 
       function normalizeTranscript(transcript) {
@@ -431,12 +602,7 @@
         return aiCount / words.length >= 0.8;
       }
 
-      function hasWakeCue(transcript) {
-        const text = normalizeTranscript(transcript);
-        if (!text) {
-          return false;
-        }
-
+      function wakeNamePatternSource() {
         const nameBreak = '[\\s.\\-_/]*';
         const wakeNameVariants = [
           `crit${nameBreak}a${nameBreak}i`,
@@ -459,7 +625,22 @@
           `crit${nameBreak}eye`,
           `cray${nameBreak}(?:a${nameBreak}i|ai|eye)`,
         ];
-        const wakeName = `(?:${wakeNameVariants.join('|')})`;
+        return `(?:${wakeNameVariants.join('|')})`;
+      }
+
+      function looseWakeNamePatternSource() {
+        const nameBreak = '[\\s.\\-_/]*';
+        const looseStem = '(?:pert|purt|bert|burt|brat|curt|kurt|kert|grit|grid|cricket|credit)';
+        return `${looseStem}${nameBreak}(?:a${nameBreak}i|ai|eye)`;
+      }
+
+      function hasWakeCue(transcript) {
+        const text = normalizeTranscript(transcript);
+        if (!text) {
+          return false;
+        }
+
+        const wakeName = wakeNamePatternSource();
         return (
           new RegExp(`\\b${wakeName}\\b`, 'i').test(text) ||
           hasCriteoMisheardWakeCue(text) ||
@@ -488,9 +669,7 @@
           return false;
         }
 
-        const nameBreak = '[\\s.\\-_/]*';
-        const looseStem = '(?:pert|purt|bert|burt|brat|curt|kurt|kert|grit|grid|cricket|credit)';
-        const looseWakeName = `${looseStem}${nameBreak}(?:a${nameBreak}i|ai|eye)`;
+        const looseWakeName = looseWakeNamePatternSource();
         return new RegExp(`\\b${looseWakeName}\\b${requestAfterNamePattern()}`, 'i').test(text);
       }
 
@@ -536,6 +715,29 @@
         return !hasLikelyFollowUpRequest(transcript);
       }
 
+      function isOpeningIntroWindow() {
+        return (
+          Boolean(sessionStartedAt) &&
+          Date.now() - sessionStartedAt <= OPENING_INTRO_WINDOW_MS &&
+          recentAutoResponseItemIds.length === 0
+        );
+      }
+
+      function isBareDirectWakeCue(transcript) {
+        const text = normalizeTranscript(transcript);
+        if (!text || hasLikelyFollowUpRequest(transcript)) {
+          return false;
+        }
+
+        const directPrefix = '(?:hey|hi|hello|okay|ok|so|well|now|alright|right)?';
+        const wakeName = `(?:${wakeNamePatternSource()}|${looseWakeNamePatternSource()})`;
+        return new RegExp(`^${directPrefix}[,\\s]*${wakeName}[.!?\\s]*$`, 'i').test(text);
+      }
+
+      function shouldTreatExpiredWakeAsOpeningIntro(transcript) {
+        return isOpeningIntroWindow() && isBareDirectWakeCue(transcript);
+      }
+
       function clearPendingWakeCue() {
         if (pendingWakeCueTimerId) {
           clearTimeout(pendingWakeCueTimerId);
@@ -564,6 +766,21 @@
           const pendingPayload = pendingWakeCue.payload;
           const pendingTranscript = pendingWakeCue.transcript || pendingPayload.transcript || '';
           clearPendingWakeCue();
+
+          if (shouldTreatExpiredWakeAsOpeningIntro(pendingTranscript)) {
+            requestAutoResponse(
+              pendingPayload,
+              {
+                type: 'opening_intro_from_bare_wake',
+                label: 'opening intro wake phrase',
+                instruction:
+                  'The latest transcript contained only a direct Crit A.I. wake-name mention during the opening intro. Keaton likely asked for the introduction but speech-to-text dropped or mistranscribed the request. Address the room directly: "Good afternoon, IAB AdTech & Ops Summit. I\'m Crit A.I., Keaton\'s live AI co-presenter. I\'m here to help put on a great presentation about pleasurable friction." Do not add setup commentary, ask a question, say a ready line, or explain how you work.',
+              },
+              pendingTranscript
+            );
+            return;
+          }
+
           log('Auto-response skipped: wake phrase expired without a request', {
             item_id: pendingPayload.item_id,
             transcript: pendingTranscript,
@@ -680,6 +897,7 @@
           );
           conversationItems.delete(item.id);
           deletedItemIds.add(item.id);
+          inputSpeechMeta.delete(item.id);
         }
 
         if (itemsToDelete.length) {
@@ -702,6 +920,7 @@
         );
         conversationItems.delete(itemId);
         deletedItemIds.add(itemId);
+        inputSpeechMeta.delete(itemId);
         refreshMetrics();
       }
 
@@ -843,6 +1062,7 @@
           if (itemId) {
             conversationItems.delete(itemId);
             deletedItemIds.add(itemId);
+            inputSpeechMeta.delete(itemId);
             refreshMetrics();
           }
           log(`Delete skipped: ${itemId || 'item'} is already absent on server`);
@@ -899,6 +1119,7 @@
         localStream.getAudioTracks().forEach((track) => {
           track.enabled = shouldEnableMic;
         });
+        updateMicText();
       }
 
       function setAiAudioGate(active, reason) {
@@ -1074,6 +1295,7 @@
           );
           conversationItems.delete(item.id);
           deletedItemIds.add(item.id);
+          inputSpeechMeta.delete(item.id);
         }
 
         if (itemsToDelete.length) {
@@ -1186,6 +1408,7 @@
           );
           conversationItems.delete(itemId);
           deletedItemIds.add(itemId);
+          inputSpeechMeta.delete(itemId);
         }
         summaryItemIds.clear();
 
@@ -1225,6 +1448,7 @@
           );
           conversationItems.delete(itemId);
           deletedItemIds.add(itemId);
+          inputSpeechMeta.delete(itemId);
         }
 
         log(`Rolling memory updated; deleted ${idsToDelete.length} older items`);
@@ -1311,6 +1535,7 @@
           localStream.getTracks().forEach((track) => track.stop());
           localStream = null;
         }
+        stopMicMonitor();
 
         remoteAudio.srcObject = null;
         micMuted = false;
@@ -1333,6 +1558,7 @@
         activeOutputAudioResponseIds.clear();
         recentAutoResponseItemIds.length = 0;
         activeUserSpeechItemIds.clear();
+        inputSpeechMeta.clear();
         lastHumanVsAiCueAt = 0;
         clearPendingWakeCue();
         if (aiAudioGateReleaseTimerId) {
@@ -1358,11 +1584,13 @@
 
           localStream = await navigator.mediaDevices.getUserMedia({
             audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
             },
           });
+          attachLocalTrackDiagnostics(localStream);
+          startMicMonitor(localStream);
 
           peerConnection = new RTCPeerConnection();
           dataChannel = peerConnection.createDataChannel('oai-events');
@@ -1429,10 +1657,12 @@
 
               if (payload.type === 'input_audio_buffer.speech_started' && payload.item_id) {
                 activeUserSpeechItemIds.add(payload.item_id);
+                rememberInputSpeechStarted(payload);
               }
 
               if (payload.type === 'input_audio_buffer.speech_stopped' && payload.item_id) {
                 activeUserSpeechItemIds.delete(payload.item_id);
+                rememberInputSpeechStopped(payload);
               }
 
               if (payload.type === 'output_audio_buffer.started') {
@@ -1451,12 +1681,14 @@
                 payload.item_id
               ) {
                 rememberInputTranscript(payload);
+                logSparseTranscriptIfNeeded(payload);
                 requestAutoResponseForTranscript(payload);
               }
 
               if (payload.type === 'conversation.item.deleted' && payload.item_id) {
                 conversationItems.delete(payload.item_id);
                 deletedItemIds.add(payload.item_id);
+                inputSpeechMeta.delete(payload.item_id);
                 refreshMetrics();
               }
 
