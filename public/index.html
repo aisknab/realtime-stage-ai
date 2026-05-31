@@ -181,13 +181,39 @@
         overflow: hidden;
       }
 
+      .panel-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 16px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
       .panel h2 {
         margin: 0;
-        padding: 18px 20px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
         font-size: 1.1rem;
         color: #cbd3dd;
         text-transform: uppercase;
+      }
+
+      .log-filter {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: #cbd3dd;
+        cursor: pointer;
+        font-size: 0.86rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        user-select: none;
+      }
+
+      .log-filter input {
+        width: 18px;
+        height: 18px;
+        margin: 0;
+        accent-color: #41e1c6;
       }
 
       #log {
@@ -221,6 +247,10 @@
 
         .controls { grid-template-columns: 1fr; }
         .metrics { grid-template-columns: 1fr; }
+        .panel-heading {
+          align-items: stretch;
+          flex-direction: column;
+        }
         button { min-height: 86px; }
       }
     </style>
@@ -267,7 +297,13 @@
       </section>
 
       <section class="panel" aria-label="Realtime event log">
-        <h2>Realtime Log</h2>
+        <div class="panel-heading">
+          <h2>Realtime Log</h2>
+          <label class="log-filter">
+            <input id="transcriptOnlyToggle" type="checkbox" />
+            <span>Client transcript only</span>
+          </label>
+        </div>
         <pre id="log"></pre>
       </section>
 
@@ -289,6 +325,7 @@
       const micText = document.getElementById('micText');
       const micWaveform = document.getElementById('micWaveform');
       const logEl = document.getElementById('log');
+      const transcriptOnlyToggle = document.getElementById('transcriptOnlyToggle');
       const remoteAudio = document.getElementById('remoteAudio');
 
       const FINALE_MODE_AFTER_MS = 24 * 60 * 1000;
@@ -298,6 +335,7 @@
       const ROLLING_MEMORY_MIN_ITEMS = 5;
       const AI_AUDIO_GATE_RELEASE_DELAY_MS = 800;
       const MAX_LOG_CHARS = 60000;
+      const MAX_LOG_ENTRIES = 800;
       const MIC_WAVEFORM_BAR_COUNT = 18;
       const OURA_FUNCTION_NAME = 'get_oura_heart_rate';
       const FINAL_AUDIO_ONLY_INSTRUCTION =
@@ -364,6 +402,7 @@
       let micSource = null;
       let micLevelAnimationId = null;
       let micWaveformLevels = Array(MIC_WAVEFORM_BAR_COUNT).fill(0);
+      const logEntries = [];
 
       for (let index = 0; index < MIC_WAVEFORM_BAR_COUNT; index += 1) {
         const bar = document.createElement('i');
@@ -402,13 +441,34 @@
         }
       }
 
-      function log(message, details) {
-        const time = new Date().toLocaleTimeString();
-        const suffix = details ? ` ${JSON.stringify(details)}` : '';
-        const nextText = `${logEl.textContent}[${time}] ${message}${suffix}\n`;
+      function formatLogEntry(entry) {
+        const suffix = entry.details ? ` ${JSON.stringify(entry.details)}` : '';
+        return `[${entry.time}] ${entry.message}${suffix}\n`;
+      }
+
+      function renderLog() {
+        const visibleEntries = transcriptOnlyToggle.checked
+          ? logEntries.filter((entry) => entry.category === 'client-transcript')
+          : logEntries;
+        const nextText = visibleEntries.map(formatLogEntry).join('');
         logEl.textContent =
           nextText.length > MAX_LOG_CHARS ? nextText.slice(nextText.length - MAX_LOG_CHARS) : nextText;
         logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function log(message, details, category = 'general') {
+        logEntries.push({
+          time: new Date().toLocaleTimeString(),
+          message,
+          details,
+          category,
+        });
+
+        if (logEntries.length > MAX_LOG_ENTRIES) {
+          logEntries.splice(0, logEntries.length - MAX_LOG_ENTRIES);
+        }
+
+        renderLog();
       }
 
       function formatElapsed(ms) {
@@ -732,6 +792,39 @@
             transcript: payload.transcript || '',
           });
         }
+      }
+
+      function logClientTranscript(payload) {
+        const meta = inputSpeechMeta.get(payload.item_id);
+        const durationMs = Number(meta?.durationMs);
+        const details = {
+          item_id: payload.item_id,
+        };
+
+        if (Number.isFinite(durationMs)) {
+          details.duration_seconds = Math.round(durationMs / 100) / 10;
+        }
+
+        if (meta?.videoShielded || videoShieldedItemIds.has(payload.item_id)) {
+          details.video_shielded = true;
+        }
+
+        const transcript = String(payload.transcript || '').trim();
+        log(`Client transcript: ${transcript || '(empty)'}`, details, 'client-transcript');
+      }
+
+      function logClientTranscriptFailure(payload) {
+        const details = {};
+
+        if (payload.item_id) {
+          details.item_id = payload.item_id;
+        }
+
+        if (payload.error) {
+          details.error = payload.error;
+        }
+
+        log('Client transcript failed', details, 'client-transcript');
       }
 
       function normalizeTranscript(transcript) {
@@ -2100,8 +2193,13 @@
                 payload.item_id
               ) {
                 rememberInputTranscript(payload);
+                logClientTranscript(payload);
                 logSparseTranscriptIfNeeded(payload);
                 requestAutoResponseForTranscript(payload);
+              }
+
+              if (payload.type === 'conversation.item.input_audio_transcription.failed') {
+                logClientTranscriptFailure(payload);
               }
 
               if (payload.type === 'conversation.item.deleted' && payload.item_id) {
@@ -2292,6 +2390,7 @@
       muteBtn.addEventListener('click', toggleMute);
       finaleBtn.addEventListener('click', () => enterFinaleMode('manual control'));
       killBtn.addEventListener('click', stopSession);
+      transcriptOnlyToggle.addEventListener('change', renderLog);
       refreshOuraStatus();
     </script>
   </body>
