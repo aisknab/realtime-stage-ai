@@ -1078,8 +1078,9 @@
       function hasHumanVsAiPrimaryCue(transcript) {
         const text = normalizeTranscript(transcript);
         return (
-          /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+(?:present|connect|do|deliver|read)\b/.test(text) ||
-          /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+.*\b(?:audience|slide|room|stage)\b/.test(text)
+          /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+(?:have\s+)?(?:present(?:ed)?|connect(?:ed)?|do|done|deliver(?:ed)?|read|stand|stood|engage(?:d)?)\b/.test(text) ||
+          /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+(?:have\s+)?.*\b(?:audience|slide|room|stage|front\s+of\s+you|engage\s+with\s+you)\b/.test(text) ||
+          /\bam\s+i\s+standing\b.*\bor\s+is\s+(?:the\s+)?ai\s+(?:just\s+)?presenting\b/.test(text)
         );
       }
 
