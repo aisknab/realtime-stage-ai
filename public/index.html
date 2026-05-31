@@ -1109,6 +1109,15 @@
       }
 
       function detectAutoResponseTrigger(transcript) {
+        if (hasHumanVsAiFollowUpCue(transcript)) {
+          return {
+            type: 'human_vs_ai_follow_up',
+            label: 'human-vs-AI follow-up cue',
+            instruction:
+              'The latest transcript matched the human-versus-AI follow-up. Say something very close to: "Keaton, come on. All of your slides were done by AI too. I\'m putting my hand up to do the presentation next year." Stop immediately after that so Keaton can close. Do not say Keaton\'s final line, do not concede that the human was better, and do not make a generic closing handoff.',
+          };
+        }
+
         if (hasHumanVsAiPrimaryCue(transcript)) {
           lastHumanVsAiCueAt = Date.now();
           return {
@@ -1116,15 +1125,6 @@
             label: 'human-vs-AI stage cue',
             instruction:
               'The latest transcript matched the human-versus-AI stage bit. Respond to that latest turn immediately. Be mock-offended and competitive: say you could have done a much better job than Keaton, with one concrete reason such as reading the room, sharpening the point, or delivering the moment better. Do not praise Keaton, tell him to take a bow, concede that the human was better, or make a generic closing handoff. Then stop.',
-          };
-        }
-
-        if (hasHumanVsAiFollowUpCue(transcript)) {
-          return {
-            type: 'human_vs_ai_follow_up',
-            label: 'human-vs-AI follow-up cue',
-            instruction:
-              'The latest transcript matched the human-versus-AI follow-up. Accuse Keaton playfully that the slides were made with AI too, make one concise point, and stop.',
           };
         }
 

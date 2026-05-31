@@ -80,7 +80,7 @@ Because `gpt-realtime-2` can produce both `commentary` and `final_answer` audio 
 
 For Oura questions, Crit A.I. has a `get_oura_heart_rate` Realtime function. When asked about Oura or current heart rate, the browser calls `/oura/heart-rate`, sends the function output back to the Realtime session, and Crit A.I. speaks a concise factual answer using the latest BPM sample.
 
-The stage instructions include a specific human-versus-AI banter cue: first push back on `only a human could present this slide`, then if Keaton pushes back that a human is best, playfully accuse him that the slides were made with AI too.
+The stage instructions include a specific human-versus-AI banter cue: first push back on `only a human could present this slide`, then if Keaton pushes back that a human is best, playfully accuse him that all of the slides were done by AI and say Crit A.I. is putting her hand up to do the presentation next year.
 ## Production
 
 For a reverse-proxied server, set `HOST=0.0.0.0` and an unused app port such as `PORT=3007`.
