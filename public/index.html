@@ -276,7 +276,7 @@
 
       <section class="metrics" aria-label="Session metrics">
         <div class="metric">
-          <span>Elapsed</span>
+          <span>Live Timer</span>
           <strong id="elapsedText">00:00</strong>
         </div>
         <div class="metric">
@@ -373,6 +373,7 @@
       let aiAudioGateActive = false;
       let aiAudioGateReleaseTimerId;
       let sessionStartedAt = 0;
+      let stageStartedAt = 0;
       let timerId;
       let finaleMode = false;
       let lastPruneAt = 0;
@@ -479,7 +480,7 @@
       }
 
       function refreshMetrics() {
-        const elapsedMs = sessionStartedAt ? Date.now() - sessionStartedAt : 0;
+        const elapsedMs = stageStartedAt ? Date.now() - stageStartedAt : 0;
         elapsedText.textContent = formatElapsed(elapsedMs);
         contextText.textContent = `${conversationItems.size} items`;
         modeText.textContent = videoShieldActive ? 'Video Recovery' : finaleMode ? 'Finale' : sessionStartedAt ? stageInputArmed ? 'Live' : 'Pre-Turn' : 'Standby';
@@ -488,7 +489,7 @@
         finaleBtn.disabled = !sessionStartedAt || finaleMode;
 
         if (
-          sessionStartedAt &&
+          stageStartedAt &&
           !finaleMode &&
           elapsedMs >= FINALE_MODE_AFTER_MS &&
           dataChannel?.readyState === 'open'
@@ -1537,6 +1538,7 @@
       function armStageInputFromSelfIntro(currentItemId, transcript) {
         stageInputArmed = true;
         introVideoDetectedAt = 0;
+        startStageTimerFromItem(currentItemId, 'Keaton self-introduction');
         setVideoShield(false, 'Keaton self-introduction detected');
         deletePreTurnContext(currentItemId);
         refreshMetrics();
@@ -1549,6 +1551,7 @@
       function armStageInputFromIntroVideo(currentItemId) {
         stageInputArmed = true;
         introVideoDetectedAt = Date.now();
+        startStageTimerFromItem(currentItemId, 'AI-supercut intro marker');
         setVideoShield(false, 'AI-supercut intro marker detected');
         if (!activeUserSpeechItemIds.size) {
           clearRealtimeInputBuffer('Input audio buffer cleared after AI-supercut intro marker');
@@ -1561,6 +1564,20 @@
         refreshMetrics();
         log('AI-supercut intro marker detected; Crit A.I. is armed for Keaton');
         replayPostIntroCue(currentItemId);
+      }
+
+      function startStageTimerFromItem(itemId, reason) {
+        if (stageStartedAt) {
+          return;
+        }
+
+        const speechMeta = inputSpeechMeta.get(itemId);
+        const speechStartedAt = Number(speechMeta?.startedAt);
+        stageStartedAt = Number.isFinite(speechStartedAt) && speechStartedAt > 0 ? speechStartedAt : Date.now();
+        log('Live timer started from activation cue', {
+          item_id: itemId,
+          reason,
+        });
       }
 
       function setVideoShield(active, reason = 'video recovery') {
@@ -2046,6 +2063,7 @@
         stageInputArmed = false;
         introVideoDetectedAt = 0;
         sessionStartedAt = 0;
+        stageStartedAt = 0;
         finaleMode = false;
         lastPruneAt = 0;
         rollingSummary = '';
@@ -2114,7 +2132,8 @@
             log('Semantic VAD high + far-field noise reduction enabled; automatic VAD responses disabled');
             log('Rolling memory enabled after each completed response');
             log('Pre-turn transcript gate enabled until the AI-supercut marker or Keaton self-introduction');
-            log('Finale mode will trim old context and use faster turn detection after 24 minutes');
+            log('Live timer will start when Crit A.I. is armed by the AI-supercut marker or Keaton self-introduction');
+            log('Finale mode will trim old context and use faster turn detection after 24 live minutes');
           });
 
           dataChannel.addEventListener('message', (event) => {
