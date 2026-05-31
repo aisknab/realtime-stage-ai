@@ -686,6 +686,21 @@
         return aiCount / words.length >= 0.8;
       }
 
+      function hasKeatonSelfIntroCue(transcript) {
+        const text = normalizeTranscript(transcript)
+          .replace(/[^a-z0-9\s']/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (!text) {
+          return false;
+        }
+
+        const keatonName = "(?:keaton|keyton|keaten|keton|kitan|kitten)";
+        const introPrefix = "(?:i\\s+am|i'm|im|my\\s+name\\s+(?:is|'s)|this\\s+is)";
+        return new RegExp('\\b' + introPrefix + '\\s+' + keatonName + '\\b').test(text);
+      }
+
       function wakeNamePatternSource() {
         const nameBreak = '[\\s.\\-_/]*';
         const wakeNameVariants = [
@@ -1076,8 +1091,12 @@
           return;
         }
 
+        if (!stageInputArmed && hasKeatonSelfIntroCue(transcript)) {
+          armStageInputFromSelfIntro(payload.item_id, transcript);
+        }
+
         if (!stageInputArmed) {
-          log('Pre-turn transcript held until AI-supercut intro marker', {
+          log('Pre-turn transcript held until AI-supercut intro marker or Keaton self-introduction', {
             item_id: payload.item_id,
             transcript,
           });
@@ -1325,6 +1344,18 @@
             return;
           }
         }
+      }
+
+      function armStageInputFromSelfIntro(currentItemId, transcript) {
+        stageInputArmed = true;
+        introVideoDetectedAt = 0;
+        setVideoShield(false, 'Keaton self-introduction detected');
+        deletePreTurnContext(currentItemId);
+        refreshMetrics();
+        log('Keaton self-introduction detected; Crit A.I. is armed for Keaton', {
+          item_id: currentItemId,
+          transcript,
+        });
       }
 
       function armStageInputFromIntroVideo(currentItemId) {
@@ -1894,7 +1925,7 @@
             log('Critai transcript-gated wake-cue responses enabled');
             log('Semantic VAD high + far-field noise reduction enabled; automatic VAD responses disabled');
             log('Rolling memory enabled after each completed response');
-            log('Pre-turn transcript gate enabled until the AI-supercut intro marker');
+            log('Pre-turn transcript gate enabled until the AI-supercut marker or Keaton self-introduction');
             log('Finale mode will trim old context and use faster turn detection after 24 minutes');
           });
 
@@ -2123,7 +2154,7 @@
         }
 
         if (!stageInputArmed) {
-          log('ASK CRITAI ignored: waiting for AI-supercut intro marker');
+          log('ASK CRITAI ignored: waiting for AI-supercut intro marker or Keaton self-introduction');
           return;
         }
 
