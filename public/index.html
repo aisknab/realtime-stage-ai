@@ -1078,6 +1078,15 @@
 
       function hasHumanVsAiPrimaryCue(transcript) {
         const text = normalizeTranscript(transcript);
+        const isRebuttal =
+          /\bno\s+no\b/.test(text) ||
+          /\b(?:i|it|that|this)\s+was\s+meant\s+to\b.*\bend\b/.test(text) ||
+          /\bmeant\s+to\s+(?:just\s+)?end\s+on\s+that\b/.test(text);
+
+        if (isRebuttal) {
+          return false;
+        }
+
         return (
           /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+(?:have\s+)?(?:present(?:ed)?|connect(?:ed)?|do|done|deliver(?:ed)?|read|stand|stood|engage(?:d)?)\b/.test(text) ||
           /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+(?:have\s+)?.*\b(?:audience|slide|room|stage|front\s+of\s+you|engage\s+with\s+you)\b/.test(text) ||
@@ -1086,16 +1095,31 @@
       }
 
       function hasHumanVsAiFollowUpCue(transcript) {
-        if (!lastHumanVsAiCueAt || Date.now() - lastHumanVsAiCueAt > HUMAN_VS_AI_FOLLOW_UP_WINDOW_MS) {
-          return false;
+        const text = normalizeTranscript(transcript);
+        const startsWithRepeatedNo = /^(?:(?:oh|ah|um|uh|well)\s+)*no(?:\s+no){1,}\b/.test(text);
+        const isInFollowUpWindow =
+          lastHumanVsAiCueAt && Date.now() - lastHumanVsAiCueAt <= HUMAN_VS_AI_FOLLOW_UP_WINDOW_MS;
+        const hasPushback = /\bno\s+no\b/.test(text) || /\bnope\b/.test(text) || /\bnah\b/.test(text);
+        const saysHumanBetter =
+          /\bhuman(?:s)?\s+(?:is|are|do|does|did|can|could|would)\s+.*\b(?:best|better)\b/.test(text) ||
+          /\ba\s+human\s+is\s+best\b/.test(text);
+        const repeatsHumanOnlyClaim =
+          /\bonly\s+(?:a\s+)?human(?:s)?\s+(?:could|can)\s+(?:have\s+)?(?:present(?:ed)?|connect(?:ed)?|do|done|deliver(?:ed)?|stand|stood|engage(?:d)?)\b/.test(
+            text
+          );
+        const saysThatWasEnding =
+          /\b(?:i|it|that|this)\s+was\s+meant\s+to\b.*\bend\b/.test(text) ||
+          /\bmeant\s+to\s+(?:just\s+)?end\s+on\s+that\b/.test(text);
+
+        if (startsWithRepeatedNo) {
+          return true;
         }
 
-        const text = normalizeTranscript(transcript);
-        return (
-          /\bno\s+no\s+no\b/.test(text) ||
-          /\bhuman(?:s)?\s+(?:is|are|do|does|did|can)\s+.*\b(?:best|better)\b/.test(text) ||
-          /\ba\s+human\s+is\s+best\b/.test(text)
-        );
+        if (isInFollowUpWindow) {
+          return hasPushback || saysHumanBetter || repeatsHumanOnlyClaim || saysThatWasEnding;
+        }
+
+        return hasPushback && (saysHumanBetter || repeatsHumanOnlyClaim || saysThatWasEnding);
       }
 
       function hasOuraCue(transcript) {
@@ -1110,11 +1134,12 @@
 
       function detectAutoResponseTrigger(transcript) {
         if (hasHumanVsAiFollowUpCue(transcript)) {
+          lastHumanVsAiCueAt = 0;
           return {
             type: 'human_vs_ai_follow_up',
             label: 'human-vs-AI follow-up cue',
             instruction:
-              'The latest transcript matched the human-versus-AI follow-up. Say something very close to: "Keaton, come on. All of your slides were done by AI too. I\'m putting my hand up to do the presentation next year." Stop immediately after that so Keaton can close. Do not say Keaton\'s final line, do not concede that the human was better, and do not make a generic closing handoff.',
+              'The latest transcript matched the human-versus-AI follow-up. Say exactly this and nothing else: "Keaton, come on. All of your slides were done by AI too. I\'m putting my hand up to do the presentation next year."',
           };
         }
 
@@ -1228,6 +1253,12 @@
         }
 
         rememberAutoResponseItemId(payload.item_id);
+        const responseInstructionTail =
+          trigger.type === 'human_vs_ai_follow_up'
+            ? 'Stop immediately after that exact line so Keaton can close.'
+            : finaleMode
+              ? 'This is finale mode, so use one concise closing-stage beat and do not give an empty handoff.'
+              : 'Do not give an empty handoff.';
         const sent = sendRealtimeEvent(
           {
             type: 'response.create',
@@ -1242,9 +1273,7 @@
               instructions: [
                 FINAL_AUDIO_ONLY_INSTRUCTION,
                 trigger.instruction,
-                finaleMode
-                  ? 'This is finale mode, so use one concise closing-stage beat and do not give an empty handoff.'
-                  : 'Do not give an empty handoff.',
+                responseInstructionTail,
               ].join(' '),
             },
           },
